@@ -319,6 +319,18 @@ def _worker_env(base_env: Mapping[str, str] | None = None) -> dict[str, str]:
     return env
 
 
+def _worker_runner(runner_path: Path | None = None) -> str:
+    path = RUNNER_PATH if runner_path is None else runner_path
+    return str(path) if path.is_file() else RUNNER_MODULE
+
+
+def _worker_command(root: Path, job_id: str, token: str, *, runner_path: Path | None = None) -> list[str]:
+    path = RUNNER_PATH if runner_path is None else runner_path
+    if path.is_file():
+        return [sys.executable, str(path), "--_worker", str(root), job_id, token]
+    return [sys.executable, "-m", RUNNER_MODULE, "--_worker", str(root), job_id, token]
+
+
 def _group_has_members(pgid: int) -> bool:
     """Keep supervisor alive while non-zombie provider descendants remain."""
     try:
@@ -443,7 +455,7 @@ class JobManager:
         launcher = self._launcher()
         job = self.store.create(request)
         token = secrets.token_hex(32)
-        atomic_write(job.directory / "worker.json", _json_text({"token": token, "pid": None, "pgid": None, "runner": RUNNER_MODULE, "launcher": launcher}))
+        atomic_write(job.directory / "worker.json", _json_text({"token": token, "pid": None, "pgid": None, "runner": _worker_runner(), "launcher": launcher}))
         for name in ("stdout.jsonl", "stderr.log", "manager.stdout.log", "manager.stderr.log"):
             atomic_write(job.directory / name, "")
         if launcher == "launchctl":
@@ -494,8 +506,11 @@ class JobManager:
         except (subprocess.TimeoutExpired, OSError, subprocess.SubprocessError):
             return None
 
+    def _worker_command(self, job: Job, token: str, *, runner_path: Path | None = None) -> list[str]:
+        return _worker_command(self.store.root, job.job_id, token, runner_path=runner_path)
+
     def _launch(self, job: Job, token: str) -> None:
-        command = [sys.executable, "-m", RUNNER_MODULE, "--_worker", str(self.store.root), job.job_id, token]
+        command = self._worker_command(job, token)
         stdout = job.directory / "manager.stdout.log"
         stderr = job.directory / "manager.stderr.log"
         with _append_stream(stdout) as out, _append_stream(stderr) as err:

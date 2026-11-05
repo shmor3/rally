@@ -1710,7 +1710,8 @@ class AgentJobLifecycleTests(unittest.TestCase):
         command = run.call_args.args[0]
         identity = json.loads((self.store.get(job_id).directory / "worker.json").read_text())
         self.assertEqual(command[:2], ["launchctl", "submit"])
-        self.assertEqual(command[command.index("--") + 1:command.index("--_worker")], [sys.executable, "-m", "rally_core"])
+        self.assertEqual(command[command.index("--") + 1:command.index("--_worker")], [sys.executable, str(RUNNER)])
+        self.assertEqual(identity["runner"], str(RUNNER))
         self.assertIn(identity["token"], command)
         self.assertEqual(command[command.index("--_worker") + 1:][:2], [str(self.store.root), job_id])
 
@@ -2385,6 +2386,7 @@ class AgentJobLifecycleTests(unittest.TestCase):
             self.assertEqual(rally_core.process._public_text(prose), prose)
 
     def test_detached_command_construction_and_module_bootstrap(self):
+        # Checkout branch: runner exists as regular file
         with mock.patch.dict(os.environ, {"AGENT_JOB_LAUNCHER": "detached"}), \
              mock.patch("subprocess.Popen") as popen_mock:
             popen_mock.return_value = mock.MagicMock(pid=99999, wait=mock.MagicMock())
@@ -2394,12 +2396,103 @@ class AgentJobLifecycleTests(unittest.TestCase):
         call_args = popen_mock.call_args
         command = call_args.args[0]
         kwargs = call_args.kwargs
-        self.assertEqual(command[:3], [sys.executable, "-m", "rally_core"])
-        self.assertEqual(command[3], "--_worker")
-        self.assertEqual(command[4:], [str(self.store.root), job_id, identity["token"]])
-        self.assertEqual(identity["runner"], "rally_core")
+        self.assertEqual(command[:2], [sys.executable, str(RUNNER)])
+        self.assertEqual(command[2], "--_worker")
+        self.assertEqual(command[3:], [str(self.store.root), job_id, identity["token"]])
+        self.assertEqual(identity["runner"], str(RUNNER))
         self.assertIn("PYTHONPATH", kwargs.get("env", {}))
         self.assertIn(str(ROOT), kwargs["env"]["PYTHONPATH"])
+
+        # Installed branch: runner does not exist as regular file
+        with mock.patch.dict(os.environ, {"AGENT_JOB_LAUNCHER": "detached"}), \
+             mock.patch.object(rally_core.process, "RUNNER_PATH", self.workspace / "missing-runner"), \
+             mock.patch("subprocess.Popen") as popen_mock_inst:
+            popen_mock_inst.return_value = mock.MagicMock(pid=99998, wait=mock.MagicMock())
+            job_id_inst = self.manager.start(self.request())["job_id"]
+        job_inst = self.store.get(job_id_inst)
+        identity_inst = json.loads((job_inst.directory / "worker.json").read_text())
+        call_args_inst = popen_mock_inst.call_args
+        command_inst = call_args_inst.args[0]
+        self.assertEqual(command_inst[:3], [sys.executable, "-m", "rally_core"])
+        self.assertEqual(command_inst[3], "--_worker")
+        self.assertEqual(command_inst[4:], [str(self.store.root), job_id_inst, identity_inst["token"]])
+        self.assertEqual(identity_inst["runner"], "rally_core")
+
+    def test_worker_command_selector_branches(self):
+        # Checkout branch: existing regular file
+        custom_runner = self.workspace / "custom-runner"
+        custom_runner.write_text("#!/usr/bin/env python3\n")
+        custom_runner.chmod(0o755)
+        cmd_checkout = rally_core.process._worker_command(self.store.root, "job-1", "token-1", runner_path=custom_runner)
+        self.assertEqual(cmd_checkout, [sys.executable, str(custom_runner), "--_worker", str(self.store.root), "job-1", "token-1"])
+        self.assertEqual(rally_core.process._worker_runner(runner_path=custom_runner), str(custom_runner))
+
+        # Installed branch: nonexistent path
+        missing_runner = self.workspace / "no-such-runner"
+        cmd_installed = rally_core.process._worker_command(self.store.root, "job-2", "token-2", runner_path=missing_runner)
+        self.assertEqual(cmd_installed, [sys.executable, "-m", "rally_core", "--_worker", str(self.store.root), "job-2", "token-2"])
+        self.assertEqual(rally_core.process._worker_runner(runner_path=missing_runner), "rally_core")
+
+    def test_launchctl_source_checkout_worker_lifecycle_from_foreign_cwd(self):
+        fake_state_dir = self.workspace / "launchctl_state"
+        fake_state_dir.mkdir()
+        fake_launchctl = self.workspace / "fake_launchctl"
+        fake_launchctl.write_text(
+            f"#!{sys.executable}\n"
+            "import os, sys, subprocess, signal\n"
+            "from pathlib import Path\n"
+            f"state_dir = Path({str(fake_state_dir)!r})\n"
+            "args = sys.argv[1:]\n"
+            "if not args:\n"
+            "    sys.exit(1)\n"
+            "action = args[0]\n"
+            "if action == 'submit':\n"
+            "    label = args[args.index('-l') + 1]\n"
+            "    cmd = args[args.index('--') + 1:]\n"
+            "    clean_env = {k: v for k, v in os.environ.items() if k != 'PYTHONPATH'}\n"
+            f"    proc = subprocess.Popen(cmd, cwd={str(self.workspace)!r}, env=clean_env, start_new_session=True)\n"
+            "    (state_dir / f'{label}.pid').write_text(str(proc.pid))\n"
+            "    sys.exit(0)\n"
+            "elif action == 'list':\n"
+            "    label = args[1]\n"
+            "    pid_file = state_dir / f'{label}.pid'\n"
+            "    if not pid_file.exists():\n"
+            "        sys.exit(1)\n"
+            "    try:\n"
+            "        pid = int(pid_file.read_text().strip())\n"
+            "        os.kill(pid, 0)\n"
+            "        sys.exit(0)\n"
+            "    except (OSError, ValueError):\n"
+            "        sys.exit(1)\n"
+            "elif action == 'remove':\n"
+            "    label = args[1]\n"
+            "    pid_file = state_dir / f'{label}.pid'\n"
+            "    if pid_file.exists():\n"
+            "        try:\n"
+            "            pid = int(pid_file.read_text().strip())\n"
+            "            os.kill(pid, signal.SIGTERM)\n"
+            "        except OSError:\n"
+            "            pass\n"
+            "        pid_file.unlink(missing_ok=True)\n"
+            "    sys.exit(0)\n"
+            "sys.exit(1)\n"
+        )
+        fake_launchctl.chmod(0o755)
+
+        foreign_cwd = self.workspace / "foreign_project"
+        foreign_cwd.mkdir()
+        env = {
+            "AGENT_JOB_LAUNCHER": "launchctl",
+            "AGENT_JOB_LAUNCHCTL": str(fake_launchctl),
+        }
+        with mock.patch.dict(os.environ, env):
+            req = self.request(cwd=foreign_cwd)
+            summary = self.manager.start(req)
+            job_id = summary["job_id"]
+            result = self.manager.wait(job_id, timeout=10.0)
+            self.assertEqual(result["status"], "SUCCESS")
+            self.assertEqual(result["exit_code"], 0)
+            self.assertEqual(result["response"], "final answer")
 
     def test_main_module_execution_prints_usage(self):
         proc = subprocess.run([sys.executable, "-m", "rally_core", "--help"],
