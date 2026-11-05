@@ -1,0 +1,26 @@
+{
+  "agy": {
+    "provider": "agy",
+    "modes": ["new", "resume"],
+    "bypass_flags": ["--dangerously-skip-permissions"],
+    "stream": "json"
+  },
+  "copilot": {
+    "provider": "copilot",
+    "modes": ["new", "resume"],
+    "bypass_flags": ["--allow-all", "--no-ask-user"],
+    "stream": "jsonl"
+  },
+  "codex": {
+    "provider": "codex",
+    "modes": ["new", "resume"],
+    "bypass_flags": ["--dangerously-bypass-approvals-and-sandbox"],
+    "stream": "jsonl"
+  },
+  "claude": {
+    "provider": "claude",
+    "modes": ["new", "resume"],
+    "bypass_flags": ["--dangerously-skip-permissions"],
+    "stream": "jsonl"
+  }
+}

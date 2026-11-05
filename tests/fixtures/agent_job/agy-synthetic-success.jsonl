@@ -1,0 +1,9 @@
+diagnostic: workspace ready
+{
+  "status": "SUCCESS",
+  "response": "AGY_FIXTURE_OK",
+  "conversation_id": "agy-fixture-session",
+  "model": "gemini-3.8-flash-high",
+  "usage": {"input_tokens": 12, "output_tokens": 4, "total_tokens": 16, "authorization": "credential-sentinel"},
+  "debug": {"stderr": "credential-sentinel"}
+}

@@ -1,0 +1,4 @@
+{"type":"session.mcp_server_status_changed","data":{"serverName":"lean-ctx","status":"pending"},"id":"copilot-mcp-pending-1","timestamp":"2026-01-01T00:00:00.000Z","parentId":"copilot-parent-0","ephemeral":true}
+{"type":"session.mcp_server_status_changed","data":{"serverName":"lean-ctx","status":"connected"},"id":"copilot-mcp-conn-1","timestamp":"2026-01-01T00:00:00.000Z","parentId":"copilot-parent-0","ephemeral":true}
+{"type":"session.mcp_server_status_changed","data":{"serverName":"github-mcp-server","status":"pending"},"id":"copilot-mcp-pending-2","timestamp":"2026-01-01T00:00:00.000Z","parentId":"copilot-parent-0","ephemeral":true}
+{"type":"session.mcp_server_status_changed","data":{"serverName":"github-mcp-server","status":"connected"},"id":"copilot-mcp-conn-2","timestamp":"2026-01-01T00:00:00.000Z","parentId":"copilot-parent-0","ephemeral":true}

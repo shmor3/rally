@@ -1,0 +1,4 @@
+{"type":"session.start","data":{"sessionId":"copilot-fixture-session"}}
+MCP diagnostic: token=credential-sentinel
+{"type":"assistant.message","data":{"messageId":"m1","model":"mai-code-1.1-flash","content":"COPILOT_FIXTURE_OK","phase":"final_answer"}}
+{"type":"assistant.turn_end","data":{"turnId":"0"}}

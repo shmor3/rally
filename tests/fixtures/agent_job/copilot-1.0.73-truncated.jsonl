@@ -1,0 +1,4 @@
+{"type":"session.start","data":{"sessionId":"copilot-fixture-session"}}
+{"type":"assistant.message_start","data":{"messageId":"m1","phase":"final_answer"}}
+{"type":"assistant.message_delta","data":{"messageId":"m1","deltaContent":"COP"}}
+{"type":"assistant.message","data":{"messageId":"m1","content":"COPILOT_FIXT

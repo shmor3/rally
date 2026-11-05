@@ -1,0 +1,5 @@
+{"type":"session.start","data":{"sessionId":"copilot-fixture-session"}}
+{"type":"session.auto_mode_resolved","data":{"chosenModel":"mai-code-1.1-flash"}}
+Error: usage limit reached; token=credential-sentinel
+{"type":"session.error","data":{"errorType":"quota","message":"Premium request quota exceeded. Authorization: Bearer credential-sentinel-token","stack":"credential-sentinel"}}
+{"type":"result","timestamp":"2026-01-01T00:00:00.000Z","sessionId":"copilot-fixture-session","exitCode":1,"usage":{"premiumRequests":0,"sessionDurationMs":120}}

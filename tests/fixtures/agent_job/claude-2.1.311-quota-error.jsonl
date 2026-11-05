@@ -1,0 +1,2 @@
+{"type":"system","subtype":"init","session_id":"claude-fixture-session","model":"claude-haiku-5-5","permissionMode":"bypassPermissions"}
+{"type":"result","subtype":"success","is_error":true,"terminal_reason":"api_error","api_error_status":429,"api_error_code":"rate_limit_error","api_error_origin":"first_party","result":"Usage limit reached","session_id":"claude-fixture-session","total_cost_usd":0,"usage":{"input_tokens":0,"output_tokens":0},"errors":["Quota exhausted. Authorization: Bearer credential-sentinel-token"],"authorization":"credential-sentinel"}

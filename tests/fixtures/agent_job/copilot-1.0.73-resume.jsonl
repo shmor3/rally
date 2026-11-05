@@ -1,0 +1,5 @@
+{"type":"session.auto_mode_resolved","data":{"chosenModel":"mai-code-1.1-flash","reasoningBucket":"low"}}
+{"type":"assistant.message","data":{"messageId":"copilot-msg-1","model":"mai-code-1.1-flash","content":"COPILOT_FIXTURE_RESUME_OK","toolRequests":[],"interactionId":"copilot-interaction-1","turnId":"0","phase":"final_answer","outputTokens":12},"id":"copilot-event-msg-resume","timestamp":"2026-01-01T00:00:00.000Z","parentId":"copilot-parent-1"}
+{"type":"session.usage_checkpoint","data":{"totalNanoAiu":344380000,"totalPremiumRequests":0,"modelCacheState":[{"modelId":"mai-code-1.1-flash","cacheExpiresAt":"2026-01-01T00:30:00.000Z","cacheTtlSeconds":1800}]},"id":"copilot-event-usage","timestamp":"2026-01-01T00:00:00.000Z","parentId":"copilot-parent-1"}
+{"type":"assistant.idle","data":{},"id":"copilot-event-idle","timestamp":"2026-01-01T00:00:00.000Z","parentId":"copilot-parent-1","ephemeral":true}
+{"type":"result","timestamp":"2026-01-01T00:00:00.000Z","sessionId":"copilot-fixture-session","exitCode":0,"usage":{"premiumRequests":0,"totalApiDurationMs":3129,"sessionDurationMs":28233,"codeChanges":{"linesAdded":0,"linesRemoved":0,"filesModified":[]}}}

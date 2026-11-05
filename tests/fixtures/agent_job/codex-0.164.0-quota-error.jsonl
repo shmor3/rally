@@ -1,0 +1,4 @@
+{"type":"thread.started","thread_id":"codex-fixture-thread"}
+{"type":"turn.started"}
+{"type":"error","message":"You have hit your usage limit. Authorization: Bearer credential-sentinel-token"}
+{"type":"turn.failed","error":{"message":"You have hit your usage limit. api_key=credential-sentinel","detail":"credential-sentinel"}}

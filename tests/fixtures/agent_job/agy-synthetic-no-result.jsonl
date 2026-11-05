@@ -1,0 +1,3 @@
+diagnostic: token=credential-sentinel
+{"event":"started"}
+{"diagnostic":"credential-sentinel"}

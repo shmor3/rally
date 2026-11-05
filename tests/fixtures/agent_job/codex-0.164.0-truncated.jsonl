@@ -1,0 +1,4 @@
+{"type":"thread.started","thread_id":"codex-fixture-thread"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"CODEX_FIXTURE_OK"}}
+{"type":"turn.completed","usage":{"input_tokens":36742,"cached_in
