@@ -7,7 +7,7 @@ Rally is a lightweight, durable multi-provider agent job runner. It provides a u
 - **Standard Library Only**: Requires Python 3.9+ with zero external runtime dependencies.
 - **Install-Free**: Executable directly from checkout via `./rally` or `/path/to/rally`.
 - **Multi-Provider Support**: Unified lifecycle for AGY, GitHub Copilot CLI, OpenAI Codex CLI, and Anthropic Claude Code.
-- **Durable Lifecycle**: Detached background execution, non-polling wait, crash recovery, and resumable follow-up sessions.
+- **Durable Lifecycle**: Detached background execution, quiet wait (internally bounded polling without chatter), crash recovery, and resumable follow-up sessions.
 - **Clean Result Schema**: Normalized JSON output with truncated payloads and sanitized public errors.
 - **Backward Compatibility**: Preserves generic `agent-job` invocation and `AGENT_JOB_*` environment configuration.
 
@@ -86,13 +86,13 @@ Starts a job, streams raw provider progress to durable logs, blocks until the jo
 Starts a detached background job and immediately prints the initial descriptor JSON to standard output. Use `wait` or `status` with the returned `job_id`.
 
 ### `rally followup JOB_ID (--prompt TEXT | --prompt-file FILE)`
-Starts a new background job continuing an existing conversation thread from a completed source job. The source job must have completed successfully and recorded a resumable `session_id`. Returns a descriptor for the new job.
+Starts a new background job continuing an existing conversation thread from a terminal source job (whether `SUCCESS`, `ERROR`, or `STOPPED`) that recorded a resumable `session_id`. Returns a descriptor for the new job.
 
 ### `rally status JOB_ID`
 Prints summary JSON for the specified job. If a worker process crashed or exited unexpectedly, `status` detects dead workers and reconciles the job state into a durable terminal `ERROR` result.
 
 ### `rally wait JOB_ID [--timeout SECONDS]`
-Waits for the specified job to enter a terminal state and outputs the final result JSON. Emits no polling chatter. If `--timeout` expires before completion, `wait` exits with code 124 without killing the worker.
+Waits for the specified job to enter a terminal state and outputs the final result JSON. Emits no polling chatter on standard streams, internally performing bounded polling. If `--timeout` expires before completion, `wait` exits with code 124 without killing the worker.
 
 ### `rally read JOB_ID`
 Extracts and prints the assistant's final response text from standard storage.
@@ -128,9 +128,9 @@ Terminal executions produce a standardized JSON object:
   "error": null,
   "cwd": "/path/to/workspace",
   "transcript_dir": "/path/to/workspace/.artifacts/agent-jobs/20261105T190000Z-0123456789ab",
-  "created_at": "2026-11-05T19:00:00Z",
-  "started_at": "2026-11-05T19:00:01Z",
-  "finished_at": "2026-11-05T19:00:15Z",
+  "created_at": 1762369200.0,
+  "started_at": 1762369201.0,
+  "finished_at": 1762369215.0,
   "source_job_id": null,
   "provider_result": {}
 }
