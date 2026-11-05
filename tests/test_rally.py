@@ -2308,6 +2308,82 @@ class AgentJobLifecycleTests(unittest.TestCase):
         self.assertIn("[redacted]", result["error"]["message"])
         self.assertIn("[path]", result["error"]["message"])
 
+    def test_start_launch_exception_redacts_spaced_api_key_and_quoted_path_with_spaces(self):
+        quoted_path = "/Users/example/My Project/private.txt"
+        secret = "secret-token-xyz"
+        error_msg = f"launch failed with API key: {secret} at '{quoted_path}'"
+        with mock.patch.object(self.manager, "_launch", side_effect=OSError(error_msg)):
+            summary = self.manager.start(self.request())
+        result = self.manager.result(self.store.get(summary["job_id"]))
+        self.assertEqual(result["status"], "ERROR")
+        self.assertEqual(result["error"]["type"], "launch_error")
+        message = result["error"]["message"]
+        self.assertNotIn(secret, json.dumps(result))
+        self.assertNotIn(quoted_path, json.dumps(result))
+        self.assertNotIn("My Project", json.dumps(result))
+        self.assertNotIn("private.txt", json.dumps(result))
+        self.assertNotIn("/Users/example", json.dumps(result))
+        self.assertIn("API key: [redacted]", message)
+        self.assertIn("[path]", message)
+
+    def test_worker_main_outer_exception_redacts_spaced_api_key_and_quoted_path_with_spaces(self):
+        job_id = self.start()["job_id"]
+        job = self.store.get(job_id)
+        token = json.loads((job.directory / "worker.json").read_text())["token"]
+        if job_id in self.manager._children:
+            self.manager._children[job_id].kill()
+            self.manager._children[job_id].wait(timeout=2)
+
+        quoted_path = "/Users/example/My Project/private.txt"
+        secret = "secret-token-xyz"
+        error_msg = f"worker failure with API key: {secret} at '{quoted_path}'"
+        with mock.patch("rally_core.process._restore_launch_environment", side_effect=ValueError(error_msg)):
+            code = rally_core.worker_main(self.store.root, job_id, token, adapters=self.manager.adapters)
+        self.assertEqual(code, 1)
+        result = self.manager.result(job)
+        self.assertEqual(result["status"], "ERROR")
+        self.assertEqual(result["error"]["type"], "worker_error")
+        message = result["error"]["message"]
+        self.assertNotIn(secret, json.dumps(result))
+        self.assertNotIn(quoted_path, json.dumps(result))
+        self.assertNotIn("My Project", json.dumps(result))
+        self.assertNotIn("private.txt", json.dumps(result))
+        self.assertNotIn("/Users/example", json.dumps(result))
+        self.assertIn("API key: [redacted]", message)
+        self.assertIn("[path]", message)
+
+    def test_public_text_redacts_api_key_variants_and_quoted_paths_without_over_redacting_prose(self):
+        # API key variants
+        for label in ("API key:", "api key:", "Api Key =", "api-key:", "API_KEY:", "api_key ="):
+            text = rally_core.process._public_text(f"Error with {label} secret_value_99")
+            self.assertNotIn("secret_value_99", text)
+            self.assertIn("[redacted]", text)
+            clean_label = label.split()[0].rstrip(":=") if " " in label else label.rstrip(":=")
+            self.assertIn(clean_label, text)
+
+        # Quoted paths with spaces
+        quoted_cases = (
+            "'/Users/example/My Project/private.txt'",
+            "\"/Users/example/My Project/private.txt\"",
+            "'/Users/alice/Application Support/app/config.json'",
+        )
+        for path_str in quoted_cases:
+            text = rally_core.process._public_text(f"Failed opening {path_str} for write")
+            self.assertNotIn("private.txt", text)
+            self.assertNotIn("My Project", text)
+            self.assertNotIn("Application Support", text)
+            self.assertIn("[path]", text)
+
+        # Ordinary prose is preserved
+        prose_cases = (
+            "Select option yes/no to proceed",
+            "Either / or decision needed",
+            "Path calculation 10 / 5 = 2",
+            "He said 'hello / world' to us",
+        )
+        for prose in prose_cases:
+            self.assertEqual(rally_core.process._public_text(prose), prose)
+
 
 class AgyAdapterTests(unittest.TestCase):
     def setUp(self):

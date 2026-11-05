@@ -243,7 +243,7 @@ class _IncrementalSessionScanner:
 
 _CREDENTIAL_PATTERNS = (
     re.compile(r"(?i)\b(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]{4,}"),
-    re.compile(r"(?i)(\b(?:authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|token|secret"
+    re.compile(r"(?i)(\b(?:authorization|api[ _-]?key|access[ _-]?token|refresh[ _-]?token|id[ _-]?token|token|secret"
                r"|password|passwd|credentials?)\b\s*[:=]\s*)(?:\"[^\"]*\"|'[^']*'|\S+)"),
     re.compile(r"\b(?:sk|pk|ghp|gho|ghu|ghs|ghr|github_pat|xox[abprs])[-_][A-Za-z0-9_-]{8,}"),
     re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*"),
@@ -251,11 +251,13 @@ _CREDENTIAL_PATTERNS = (
 )
 
 _PATH_PATTERN = re.compile(r"/(?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+")
+_QUOTED_PATH_PATTERN = re.compile(r"""(['"])/(?:[^'"\r\n\0/]+/)+[^'"\r\n\0]*?\1""")
 
 
 def _public_text(value: object, limit: int = 300) -> str:
     """One bounded line with credential-shaped values removed; never raw provider text."""
-    text = " ".join(str(value).split())
+    text = _QUOTED_PATH_PATTERN.sub("[path]", str(value))
+    text = " ".join(text.split())
     text = _CREDENTIAL_PATTERNS[0].sub("[redacted]", text)
     text = _CREDENTIAL_PATTERNS[1].sub(r"\1[redacted]", text)
     for pattern in _CREDENTIAL_PATTERNS[2:]:
