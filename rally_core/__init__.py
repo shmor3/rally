@@ -1,4 +1,4 @@
-"""Agent job modular foundation."""
+"""Rally core modular foundation."""
 
 from __future__ import annotations
 
@@ -8,16 +8,16 @@ import types
 
 _SUBMODULE_NAMES = ("model", "store", "process", "providers.base", "providers", "cli")
 
-import agent_job.model
-import agent_job.store
-import agent_job.process
-import agent_job.providers.base
-import agent_job.providers
-import agent_job.cli
+import rally_core.model
+import rally_core.store
+import rally_core.process
+import rally_core.providers.base
+import rally_core.providers
+import rally_core.cli
 
 _OWNER_MAP: dict[str, str] = {}
 for _sub_name in _SUBMODULE_NAMES:
-    _mod = sys.modules.get(f"agent_job.{_sub_name}")
+    _mod = sys.modules.get(f"rally_core.{_sub_name}")
     if _mod is not None:
         for _name in dir(_mod):
             if not (_name.startswith("__") and _name.endswith("__")) and _name not in _OWNER_MAP:
@@ -26,9 +26,9 @@ for _sub_name in _SUBMODULE_NAMES:
 
 def _owner_module(name: str):
     if name in _OWNER_MAP:
-        return sys.modules.get(f"agent_job.{_OWNER_MAP[name]}")
+        return sys.modules.get(f"rally_core.{_OWNER_MAP[name]}")
     for sub in _SUBMODULE_NAMES:
-        mod = sys.modules.get(f"agent_job.{sub}")
+        mod = sys.modules.get(f"rally_core.{sub}")
         if mod is not None and hasattr(mod, name):
             _OWNER_MAP[name] = sub
             return mod
@@ -44,7 +44,7 @@ class _CompatibilityModule(types.ModuleType):
         if name in {"_SUBMODULE_NAMES", "_OWNER_MAP", "_CompatibilityModule"}:
             return super().__getattribute__(name)
         if name in _SUBMODULE_NAMES:
-            return sys.modules.get(f"agent_job.{name}")
+            return sys.modules.get(f"rally_core.{name}")
         owner = _owner_module(name)
         if owner is not None:
             if hasattr(owner, name):
@@ -61,14 +61,14 @@ class _CompatibilityModule(types.ModuleType):
             return
         if name in _SUBMODULE_NAMES:
             super().__setattr__(name, value)
-            sys.modules[f"agent_job.{name}"] = value
+            sys.modules[f"rally_core.{name}"] = value
             return
         super().__setattr__(name, value)
         owner = _owner_module(name)
         if owner is not None:
             setattr(owner, name, value)
         for sub in _SUBMODULE_NAMES:
-            mod = sys.modules.get(f"agent_job.{sub}")
+            mod = sys.modules.get(f"rally_core.{sub}")
             if mod is not None and mod is not owner and hasattr(mod, name):
                 setattr(mod, name, value)
 
@@ -87,7 +87,7 @@ class _CompatibilityModule(types.ModuleType):
     def __dir__(self):
         names = set(super().__dir__())
         for sub in _SUBMODULE_NAMES:
-            mod = sys.modules.get(f"agent_job.{sub}")
+            mod = sys.modules.get(f"rally_core.{sub}")
             if mod is not None:
                 names.update(dir(mod))
         return sorted(names)

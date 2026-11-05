@@ -1,4 +1,4 @@
-"""Portable agent-job foundation tests; no provider installation is required."""
+"""Portable Rally foundation tests; no provider installation is required."""
 
 import ast
 import contextlib
@@ -20,14 +20,30 @@ import unittest
 from unittest import mock
 
 
-RUNNER = Path(__file__).resolve().parents[1] / "tools" / "agent-job"
-REPO_ROOT = RUNNER.parents[1]
-TOOLS = RUNNER.parent
-if str(TOOLS) not in sys.path:
-    sys.path.insert(0, str(TOOLS))
-import agent_job
-FIXTURES = Path(__file__).resolve().parent / "fixtures" / "agent_job"
+ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = ROOT
+RUNNER = ROOT / "rally"
+COMPAT_RUNNER = ROOT / "agent-job"
+sys.path.insert(0, str(ROOT))
+import rally_core
+FIXTURES = Path(__file__).resolve().parent / "fixtures" / "rally"
 CREDENTIAL_SENTINEL = "credential-sentinel"
+
+
+class RallyIdentityTests(unittest.TestCase):
+    def test_primary_runner_is_rally(self):
+        completed = subprocess.run(
+            [str(RUNNER), "--help"], text=True, capture_output=True, check=False
+        )
+        self.assertEqual(completed.returncode, 0)
+        self.assertIn("usage: rally", completed.stdout)
+
+    def test_rally_core_compatibility_runner_uses_same_cli(self):
+        primary = subprocess.run([str(RUNNER), "--help"], text=True, capture_output=True)
+        compat = subprocess.run([str(COMPAT_RUNNER), "--help"], text=True, capture_output=True)
+        self.assertEqual(primary.returncode, 0)
+        self.assertEqual(compat.returncode, 0)
+        self.assertEqual(primary.stdout, compat.stdout)
 
 
 def parse_provider_fixture(case, provider, name, exit_code=0):
@@ -36,8 +52,8 @@ def parse_provider_fixture(case, provider, name, exit_code=0):
     path.write_bytes((FIXTURES / name).read_bytes())
     stderr_path = Path(case.workspace) / "fixture-stderr.log"
     stderr_path.write_text("")
-    request = agent_job.JobRequest(provider=provider, prompt="fixture test", cwd=Path(case.workspace))
-    return agent_job.provider_adapters()[provider].parse(request, path, stderr_path, exit_code)
+    request = rally_core.JobRequest(provider=provider, prompt="fixture test", cwd=Path(case.workspace))
+    return rally_core.provider_adapters()[provider].parse(request, path, stderr_path, exit_code)
 
 
 def assert_public_failure(case, outcome, error_type):
@@ -55,213 +71,213 @@ class AgentJobFoundationTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.workspace = Path(self.temp.name).resolve()
         self.root = self.workspace / "jobs"
-        self.store = agent_job.JobStore(self.root)
+        self.store = rally_core.JobStore(self.root)
 
     def request(self, **changes):
         fields = dict(provider="fixture", prompt="review secret prompt", cwd=self.workspace)
         fields.update(changes)
-        return agent_job.JobRequest(**fields)
+        return rally_core.JobRequest(**fields)
 
     def test_annotations_are_deferred_and_source_accepts_python_39_grammar(self):
         ast.parse(RUNNER.read_text(), feature_version=(3, 9))
-        tree = ast.parse((RUNNER.parent / "agent_job" / "model.py").read_text(), feature_version=(3, 9))
+        tree = ast.parse((RUNNER.parent / "rally_core" / "model.py").read_text(), feature_version=(3, 9))
         first_import = tree.body[1]
         self.assertIsInstance(first_import, ast.ImportFrom)
         self.assertEqual(first_import.module, "__future__")
         self.assertEqual([alias.name for alias in first_import.names], ["annotations"])
-        self.assertIsInstance(agent_job.JobRequest.__annotations__["model"], str)
+        self.assertIsInstance(rally_core.JobRequest.__annotations__["model"], str)
 
     def test_foundation_symbols_live_in_focused_modules(self):
-        from agent_job.model import JobRequest, ProviderOutcome
-        from agent_job.store import Job, JobStore
-        from agent_job.process import JobManager
-        self.assertEqual(JobRequest.__module__, "agent_job.model")
-        self.assertEqual(JobStore.__module__, "agent_job.store")
-        self.assertEqual(JobManager.__module__, "agent_job.process")
+        from rally_core.model import JobRequest, ProviderOutcome
+        from rally_core.store import Job, JobStore
+        from rally_core.process import JobManager
+        self.assertEqual(JobRequest.__module__, "rally_core.model")
+        self.assertEqual(JobStore.__module__, "rally_core.store")
+        self.assertEqual(JobManager.__module__, "rally_core.process")
 
     def test_each_adapter_has_its_own_module(self):
-        provider_adapters = agent_job.provider_adapters
+        provider_adapters = rally_core.provider_adapters
         adapters = provider_adapters()
-        self.assertEqual(adapters["agy"].__class__.__module__, "agent_job.providers.agy")
-        self.assertEqual(adapters["copilot"].__class__.__module__, "agent_job.providers.copilot")
-        self.assertEqual(adapters["codex"].__class__.__module__, "agent_job.providers.codex")
-        self.assertEqual(adapters["claude"].__class__.__module__, "agent_job.providers.claude")
+        self.assertEqual(adapters["agy"].__class__.__module__, "rally_core.providers.agy")
+        self.assertEqual(adapters["copilot"].__class__.__module__, "rally_core.providers.copilot")
+        self.assertEqual(adapters["codex"].__class__.__module__, "rally_core.providers.codex")
+        self.assertEqual(adapters["claude"].__class__.__module__, "rally_core.providers.claude")
 
     def test_provider_adapter_protocol_specifies_explicit_parse_contract(self):
         import inspect
-        from agent_job.model import ProviderAdapter
+        from rally_core.model import ProviderAdapter
         sig = inspect.signature(ProviderAdapter.parse)
         param_names = list(sig.parameters.keys())
         self.assertEqual(param_names, ["self", "request", "raw_path", "stderr_path", "exit_code"])
 
     def test_compatibility_wrapper_two_way_synchronization(self):
-        import agent_job.model as model
-        import agent_job.store as store
-        import agent_job.process as process
-        import agent_job.providers as providers
-        import agent_job.cli as cli
+        import rally_core.model as model
+        import rally_core.store as store
+        import rally_core.process as process
+        import rally_core.providers as providers
+        import rally_core.cli as cli
 
         # 1. Model symbol: SCHEMA_VERSION
         orig_schema = model.SCHEMA_VERSION
         try:
-            agent_job.SCHEMA_VERSION = 999
+            rally_core.SCHEMA_VERSION = 999
             self.assertEqual(model.SCHEMA_VERSION, 999)
-            self.assertEqual(agent_job.SCHEMA_VERSION, 999)
+            self.assertEqual(rally_core.SCHEMA_VERSION, 999)
 
             model.SCHEMA_VERSION = 888
-            self.assertEqual(agent_job.SCHEMA_VERSION, 888)
+            self.assertEqual(rally_core.SCHEMA_VERSION, 888)
             self.assertEqual(model.SCHEMA_VERSION, 888)
 
-            del agent_job.SCHEMA_VERSION
-            self.assertFalse(hasattr(agent_job, "SCHEMA_VERSION"))
+            del rally_core.SCHEMA_VERSION
+            self.assertFalse(hasattr(rally_core, "SCHEMA_VERSION"))
             self.assertFalse(hasattr(model, "SCHEMA_VERSION"))
 
             model.SCHEMA_VERSION = orig_schema
-            self.assertTrue(hasattr(agent_job, "SCHEMA_VERSION"))
-            self.assertEqual(agent_job.SCHEMA_VERSION, orig_schema)
+            self.assertTrue(hasattr(rally_core, "SCHEMA_VERSION"))
+            self.assertEqual(rally_core.SCHEMA_VERSION, orig_schema)
         finally:
             model.SCHEMA_VERSION = orig_schema
-            agent_job.SCHEMA_VERSION = orig_schema
+            rally_core.SCHEMA_VERSION = orig_schema
 
         # 2. Store symbol: atomic_write
         orig_write = store.atomic_write
         try:
             sentinel_write = lambda *args, **kwargs: None
-            agent_job.atomic_write = sentinel_write
+            rally_core.atomic_write = sentinel_write
             self.assertIs(store.atomic_write, sentinel_write)
-            self.assertIs(agent_job.atomic_write, sentinel_write)
+            self.assertIs(rally_core.atomic_write, sentinel_write)
 
             sentinel_write_2 = lambda *args, **kwargs: None
             store.atomic_write = sentinel_write_2
-            self.assertIs(agent_job.atomic_write, sentinel_write_2)
+            self.assertIs(rally_core.atomic_write, sentinel_write_2)
 
-            del agent_job.atomic_write
-            self.assertFalse(hasattr(agent_job, "atomic_write"))
+            del rally_core.atomic_write
+            self.assertFalse(hasattr(rally_core, "atomic_write"))
             self.assertFalse(hasattr(store, "atomic_write"))
 
             store.atomic_write = orig_write
-            self.assertIs(agent_job.atomic_write, orig_write)
+            self.assertIs(rally_core.atomic_write, orig_write)
         finally:
             store.atomic_write = orig_write
-            agent_job.atomic_write = orig_write
+            rally_core.atomic_write = orig_write
 
         # 3. Process symbol: JobManager
         orig_manager = process.JobManager
         try:
             dummy_manager = object()
-            agent_job.JobManager = dummy_manager
+            rally_core.JobManager = dummy_manager
             self.assertIs(process.JobManager, dummy_manager)
-            self.assertIs(agent_job.JobManager, dummy_manager)
+            self.assertIs(rally_core.JobManager, dummy_manager)
 
             dummy_manager_2 = object()
             process.JobManager = dummy_manager_2
-            self.assertIs(agent_job.JobManager, dummy_manager_2)
+            self.assertIs(rally_core.JobManager, dummy_manager_2)
 
-            del agent_job.JobManager
-            self.assertFalse(hasattr(agent_job, "JobManager"))
+            del rally_core.JobManager
+            self.assertFalse(hasattr(rally_core, "JobManager"))
             self.assertFalse(hasattr(process, "JobManager"))
 
             process.JobManager = orig_manager
-            self.assertIs(agent_job.JobManager, orig_manager)
+            self.assertIs(rally_core.JobManager, orig_manager)
         finally:
             process.JobManager = orig_manager
-            agent_job.JobManager = orig_manager
+            rally_core.JobManager = orig_manager
 
         # 4. CLI symbol: doctor_provider
         orig_doctor = cli.doctor_provider
         try:
             dummy_doctor = lambda p: {"status": "TEST"}
-            agent_job.doctor_provider = dummy_doctor
+            rally_core.doctor_provider = dummy_doctor
             self.assertIs(cli.doctor_provider, dummy_doctor)
-            self.assertIs(agent_job.doctor_provider, dummy_doctor)
+            self.assertIs(rally_core.doctor_provider, dummy_doctor)
 
             dummy_doctor_2 = lambda p: {"status": "TEST2"}
             cli.doctor_provider = dummy_doctor_2
-            self.assertIs(agent_job.doctor_provider, dummy_doctor_2)
+            self.assertIs(rally_core.doctor_provider, dummy_doctor_2)
 
-            del agent_job.doctor_provider
-            self.assertFalse(hasattr(agent_job, "doctor_provider"))
+            del rally_core.doctor_provider
+            self.assertFalse(hasattr(rally_core, "doctor_provider"))
             self.assertFalse(hasattr(cli, "doctor_provider"))
 
             cli.doctor_provider = orig_doctor
-            self.assertIs(agent_job.doctor_provider, orig_doctor)
+            self.assertIs(rally_core.doctor_provider, orig_doctor)
         finally:
             cli.doctor_provider = orig_doctor
-            agent_job.doctor_provider = orig_doctor
+            rally_core.doctor_provider = orig_doctor
 
         # 5. Providers symbol: provider_adapters
-        import agent_job.providers as providers
+        import rally_core.providers as providers
         orig_adapters = providers.provider_adapters
         try:
             dummy_adapters = lambda: {"test": None}
-            agent_job.provider_adapters = dummy_adapters
+            rally_core.provider_adapters = dummy_adapters
             self.assertIs(providers.provider_adapters, dummy_adapters)
-            self.assertIs(agent_job.provider_adapters, dummy_adapters)
+            self.assertIs(rally_core.provider_adapters, dummy_adapters)
 
             dummy_adapters_2 = lambda: {"test2": None}
             providers.provider_adapters = dummy_adapters_2
-            self.assertIs(agent_job.provider_adapters, dummy_adapters_2)
+            self.assertIs(rally_core.provider_adapters, dummy_adapters_2)
 
-            del agent_job.provider_adapters
-            self.assertFalse(hasattr(agent_job, "provider_adapters"))
+            del rally_core.provider_adapters
+            self.assertFalse(hasattr(rally_core, "provider_adapters"))
             self.assertFalse(hasattr(providers, "provider_adapters"))
 
             providers.provider_adapters = orig_adapters
-            self.assertIs(agent_job.provider_adapters, orig_adapters)
+            self.assertIs(rally_core.provider_adapters, orig_adapters)
         finally:
             providers.provider_adapters = orig_adapters
-            agent_job.provider_adapters = orig_adapters
+            rally_core.provider_adapters = orig_adapters
 
     def test_canonical_package_and_submodule_parent_identity(self):
-        import agent_job.model as model
-        import agent_job.store as store
-        import agent_job.process as process
-        import agent_job.providers as providers
-        import agent_job.cli as cli
+        import rally_core.model as model
+        import rally_core.store as store
+        import rally_core.process as process
+        import rally_core.providers as providers
+        import rally_core.cli as cli
 
-        # 1. Under test loading, agent_job is registered in sys.modules with package identity
-        self.assertIn("agent_job", sys.modules)
-        self.assertIs(sys.modules["agent_job"], agent_job)
-        self.assertTrue(hasattr(agent_job, "__path__"))
-        self.assertEqual(agent_job.__package__, "agent_job")
-        expected_pkg_dir = str(RUNNER.parent / "agent_job")
-        self.assertEqual(list(agent_job.__path__), [expected_pkg_dir])
-        self.assertIsNotNone(agent_job.__spec__)
-        self.assertEqual(list(agent_job.__spec__.submodule_search_locations), [expected_pkg_dir])
+        # 1. Under test loading, rally_core is registered in sys.modules with package identity
+        self.assertIn("rally_core", sys.modules)
+        self.assertIs(sys.modules["rally_core"], rally_core)
+        self.assertTrue(hasattr(rally_core, "__path__"))
+        self.assertEqual(rally_core.__package__, "rally_core")
+        expected_pkg_dir = str(RUNNER.parent / "rally_core")
+        self.assertEqual(list(rally_core.__path__), [expected_pkg_dir])
+        self.assertIsNotNone(rally_core.__spec__)
+        self.assertEqual(list(rally_core.__spec__.submodule_search_locations), [expected_pkg_dir])
 
         # 2. Submodule parent identity
         for sub_name, sub_mod in (("model", model), ("store", store), ("process", process), ("providers", providers), ("cli", cli)):
-            self.assertIs(sys.modules[f"agent_job.{sub_name}"], sub_mod)
-            self.assertIs(getattr(agent_job, sub_name), sub_mod)
-            expected_pkg = "agent_job.providers" if sub_name == "providers" else "agent_job"
+            self.assertIs(sys.modules[f"rally_core.{sub_name}"], sub_mod)
+            self.assertIs(getattr(rally_core, sub_name), sub_mod)
+            expected_pkg = "rally_core.providers" if sub_name == "providers" else "rally_core"
             self.assertEqual(sub_mod.__package__, expected_pkg)
 
         # 3. Under normal python import (isolated invocation)
         probe_code = (
             "import sys, os, json\n"
             f"sys.path.insert(0, {str(RUNNER.parent)!r})\n"
-            "import agent_job\n"
-            "import agent_job.model as m\n"
+            "import rally_core\n"
+            "import rally_core.model as m\n"
             "output = {\n"
-            "  'package': agent_job.__package__,\n"
-            "  'path': list(agent_job.__path__),\n"
-            "  'spec_locations': list(agent_job.__spec__.submodule_search_locations) if agent_job.__spec__ else None,\n"
-            "  'parent_is_mod': getattr(agent_job, 'model') is m,\n"
+            "  'package': rally_core.__package__,\n"
+            "  'path': list(rally_core.__path__),\n"
+            "  'spec_locations': list(rally_core.__spec__.submodule_search_locations) if rally_core.__spec__ else None,\n"
+            "  'parent_is_mod': getattr(rally_core, 'model') is m,\n"
             "  'submodule_parent': m.__package__,\n"
             "}\n"
             "print(json.dumps(output))\n"
         )
         res = subprocess.run([sys.executable, "-c", probe_code], capture_output=True, text=True, check=True)
         data = json.loads(res.stdout)
-        self.assertEqual(data["package"], "agent_job")
+        self.assertEqual(data["package"], "rally_core")
         self.assertEqual(data["path"], [expected_pkg_dir])
         self.assertEqual(data["spec_locations"], [expected_pkg_dir])
         self.assertTrue(data["parent_is_mod"])
-        self.assertEqual(data["submodule_parent"], "agent_job")
+        self.assertEqual(data["submodule_parent"], "rally_core")
 
     def test_provider_modules_observe_dynamic_process_and_base_patches(self):
-        import agent_job.process as process
-        import agent_job.providers.base as base
+        import rally_core.process as process
+        import rally_core.providers.base as base
 
         dummy_raw = self.workspace / "dummy_raw.jsonl"
         dummy_raw.write_text('{"status": "ERROR", "error": "test error message"}\n')
@@ -271,16 +287,16 @@ class AgentJobFoundationTests(unittest.TestCase):
         try:
             # (a) Owner-side patch
             process._public_text = lambda text, limit=300: f"[OWNER_PATCHED:{text}]"
-            outcome = agent_job.provider_adapters()["agy"].parse(dummy_raw, 1)
+            outcome = rally_core.provider_adapters()["agy"].parse(dummy_raw, 1)
             self.assertEqual(outcome.error.get("message"), "[OWNER_PATCHED:test error message]")
 
             # (b) Wrapper-side patch
-            agent_job._public_text = lambda text, limit=300: f"[WRAPPER_PATCHED:{text}]"
-            outcome = agent_job.provider_adapters()["agy"].parse(dummy_raw, 1)
+            rally_core._public_text = lambda text, limit=300: f"[WRAPPER_PATCHED:{text}]"
+            outcome = rally_core.provider_adapters()["agy"].parse(dummy_raw, 1)
             self.assertEqual(outcome.error.get("message"), "[WRAPPER_PATCHED:test error message]")
         finally:
             process._public_text = orig_public_text
-            agent_job._public_text = orig_public_text
+            rally_core._public_text = orig_public_text
 
         # 2. _partial_session dynamic dispatch (owner-side & wrapper-side)
         empty_raw = self.workspace / "empty_raw.jsonl"
@@ -289,18 +305,18 @@ class AgentJobFoundationTests(unittest.TestCase):
         try:
             # (a) Owner-side patch
             process._partial_session = lambda raw_path, provider: "owner-session-456"
-            outcome = agent_job.provider_adapters()["agy"].parse(empty_raw, 0)
+            outcome = rally_core.provider_adapters()["agy"].parse(empty_raw, 0)
             self.assertEqual(outcome.session_id, "owner-session-456")
-            self.assertEqual(agent_job.provider_adapters()["agy"].extract_session_id(empty_raw), "owner-session-456")
+            self.assertEqual(rally_core.provider_adapters()["agy"].extract_session_id(empty_raw), "owner-session-456")
 
             # (b) Wrapper-side patch
-            agent_job._partial_session = lambda raw_path, provider: "wrapper-session-789"
-            outcome = agent_job.provider_adapters()["agy"].parse(empty_raw, 0)
+            rally_core._partial_session = lambda raw_path, provider: "wrapper-session-789"
+            outcome = rally_core.provider_adapters()["agy"].parse(empty_raw, 0)
             self.assertEqual(outcome.session_id, "wrapper-session-789")
-            self.assertEqual(agent_job.provider_adapters()["agy"].extract_session_id(empty_raw), "wrapper-session-789")
+            self.assertEqual(rally_core.provider_adapters()["agy"].extract_session_id(empty_raw), "wrapper-session-789")
         finally:
             process._partial_session = orig_partial_session
-            agent_job._partial_session = orig_partial_session
+            rally_core._partial_session = orig_partial_session
 
         # 3. _jsonl_events dynamic dispatch (owner-side & wrapper-side)
         orig_jsonl_events = getattr(base, "_jsonl_events")
@@ -312,7 +328,7 @@ class AgentJobFoundationTests(unittest.TestCase):
             ]
             # (a) Owner-side patch
             base._jsonl_events = lambda raw_path: iter(synthetic_events)
-            outcome = agent_job.provider_adapters()["codex"].parse(dummy_raw, 0)
+            outcome = rally_core.provider_adapters()["codex"].parse(dummy_raw, 0)
             self.assertEqual(outcome.session_id, "thread-owner-123")
             self.assertEqual(outcome.response, "owner message text")
             self.assertTrue(outcome.success)
@@ -323,14 +339,14 @@ class AgentJobFoundationTests(unittest.TestCase):
                 {"type": "turn.completed", "usage": {}},
                 {"type": "item.completed", "item": {"type": "agent_message", "text": "wrapper message text"}},
             ]
-            agent_job._jsonl_events = lambda raw_path: iter(synthetic_events_2)
-            outcome = agent_job.provider_adapters()["codex"].parse(dummy_raw, 0)
+            rally_core._jsonl_events = lambda raw_path: iter(synthetic_events_2)
+            outcome = rally_core.provider_adapters()["codex"].parse(dummy_raw, 0)
             self.assertEqual(outcome.session_id, "thread-wrapper-456")
             self.assertEqual(outcome.response, "wrapper message text")
             self.assertTrue(outcome.success)
         finally:
             base._jsonl_events = orig_jsonl_events
-            agent_job._jsonl_events = orig_jsonl_events
+            rally_core._jsonl_events = orig_jsonl_events
 
     def test_create_uses_private_files_and_collision_resistant_id(self):
         job = self.store.create(self.request())
@@ -375,7 +391,7 @@ class AgentJobFoundationTests(unittest.TestCase):
     def test_nested_and_default_roots_remain_traversable_with_restrictive_umask(self):
         for root in (self.workspace / "nested" / "private" / "jobs", None):
             with self.subTest(root=root), mock.patch.dict(os.environ, {}, clear=True):
-                store = agent_job.JobStore(root, cwd=self.workspace)
+                store = rally_core.JobStore(root, cwd=self.workspace)
                 previous_umask = os.umask(0o777)
                 try:
                     job = store.create(self.request())
@@ -395,7 +411,7 @@ class AgentJobFoundationTests(unittest.TestCase):
     def test_job_id_validation_rejects_traversal_and_malformed_ids(self):
         for value in ("../outside", "/tmp/job", "x/../y", "", ".", "..", "20261027T120000Z-ABCDEF123456", "20261027T120000Z-abcdef123456\n"):
             with self.subTest(value=value), self.assertRaises(ValueError):
-                agent_job.validate_job_id(value)
+                rally_core.validate_job_id(value)
             with self.subTest(value=value), self.assertRaises(ValueError):
                 self.store.get(value)
         self.assertFalse(self.root.exists())
@@ -403,7 +419,7 @@ class AgentJobFoundationTests(unittest.TestCase):
     def test_valid_job_can_be_reopened(self):
         job = self.store.create(self.request())
         self.assertEqual(self.store.get(job.job_id), job)
-        self.assertEqual(agent_job.validate_job_id(job.job_id), job.job_id)
+        self.assertEqual(rally_core.validate_job_id(job.job_id), job.job_id)
 
     def test_symlink_root_is_rejected_without_writing_target(self):
         target = self.workspace / "target"
@@ -455,15 +471,15 @@ class AgentJobFoundationTests(unittest.TestCase):
 
     def test_default_root_uses_workspace_and_environment_override(self):
         with mock.patch.dict(os.environ, {}, clear=True):
-            store = agent_job.JobStore(cwd=self.workspace)
+            store = rally_core.JobStore(cwd=self.workspace)
             self.assertEqual(store.root, self.workspace / ".artifacts" / "agent-jobs")
         with mock.patch.dict(os.environ, {"AGENT_JOB_DIR": str(self.root)}):
-            self.assertEqual(agent_job.JobStore(cwd=self.workspace).root, self.root)
+            self.assertEqual(rally_core.JobStore(cwd=self.workspace).root, self.root)
         self.assertFalse(self.root.exists())
 
     def test_creation_retries_id_collision_without_overwriting_prompt(self):
-        fixed_time = agent_job.datetime.now(agent_job.timezone.utc)
-        with mock.patch.object(agent_job, "datetime") as clock, mock.patch.object(agent_job.secrets, "token_hex", side_effect=["a" * 12, "a" * 12, "b" * 12]) as token:
+        fixed_time = rally_core.datetime.now(rally_core.timezone.utc)
+        with mock.patch.object(rally_core, "datetime") as clock, mock.patch.object(rally_core.secrets, "token_hex", side_effect=["a" * 12, "a" * 12, "b" * 12]) as token:
             clock.now.return_value = fixed_time
             first = self.store.create(self.request(prompt="first"))
             second = self.store.create(self.request(prompt="second"))
@@ -489,8 +505,8 @@ class AgentJobFoundationTests(unittest.TestCase):
             self.assertEqual(Path(source).read_text(), "new")
             return original_replace(source, destination)
 
-        with mock.patch.object(agent_job.os, "fsync", side_effect=fsync), mock.patch.object(agent_job.os, "replace", side_effect=replace):
-            agent_job.atomic_write(path, "new")
+        with mock.patch.object(rally_core.os, "fsync", side_effect=fsync), mock.patch.object(rally_core.os, "replace", side_effect=replace):
+            rally_core.atomic_write(path, "new")
         self.assertEqual(events, ["fsync", "replace", "fsync"])
         self.assertEqual(path.read_text(), "new")
         self.assertEqual(path.stat().st_mode & 0o777, 0o600)
@@ -499,9 +515,9 @@ class AgentJobFoundationTests(unittest.TestCase):
     def test_atomic_write_cleans_temporary_file_on_failure(self):
         path = self.workspace / "artifact"
         path.write_text("old")
-        with mock.patch.object(agent_job.os, "replace", side_effect=OSError("replace failed")):
+        with mock.patch.object(rally_core.os, "replace", side_effect=OSError("replace failed")):
             with self.assertRaises(OSError):
-                agent_job.atomic_write(path, b"new")
+                rally_core.atomic_write(path, b"new")
         self.assertEqual(path.read_text(), "old")
         self.assertEqual(list(self.workspace.iterdir()), [path])
 
@@ -511,34 +527,34 @@ class AgentJobFoundationTests(unittest.TestCase):
         alias = self.workspace / "alias"
         alias.symlink_to(target)
         with self.assertRaises(ValueError):
-            agent_job.atomic_write(alias, "replacement")
+            rally_core.atomic_write(alias, "replacement")
         self.assertEqual(target.read_text(), "original")
 
     def test_provider_outcome_and_adapter_contract_are_provider_neutral(self):
-        outcome = agent_job.ProviderOutcome(True, "done", "session", {"tokens": 1}, None, "model", {"status": "ok"})
+        outcome = rally_core.ProviderOutcome(True, "done", "session", {"tokens": 1}, None, "model", {"status": "ok"})
         self.assertTrue(outcome.success)
         self.assertEqual(outcome.response, "done")
         for name in ("validate", "build_command", "parse"):
-            self.assertTrue(callable(getattr(agent_job.ProviderAdapter, name)))
+            self.assertTrue(callable(getattr(rally_core.ProviderAdapter, name)))
 
     def test_cli_rejects_duplicate_or_missing_prompt_sources_before_creation(self):
         prompt_file = self.workspace / "prompt.txt"
         prompt_file.write_text("prompt")
         for flags in (["--prompt", "text", "--prompt-file", str(prompt_file)], []):
             with self.subTest(flags=flags), mock.patch.dict(os.environ, {"AGENT_JOB_DIR": str(self.root)}), contextlib.redirect_stderr(io.StringIO()):
-                self.assertEqual(agent_job.main(["agy", "run", "--cwd", str(self.workspace), *flags]), 2)
+                self.assertEqual(rally_core.main(["agy", "run", "--cwd", str(self.workspace), *flags]), 2)
         self.assertFalse(self.root.exists())
 
     def test_cli_validates_fields_before_creating_job(self):
         for flags in (["--session", "bad\nsession"], ["--effort", "infinite"], ["--cwd", str(self.workspace / "missing")], ["--add-dir", "relative"]):
             with self.subTest(flags=flags), mock.patch.dict(os.environ, {"AGENT_JOB_DIR": str(self.root)}), contextlib.redirect_stderr(io.StringIO()):
-                self.assertEqual(agent_job.main(["agy", "--prompt", "text", *flags]), 2)
+                self.assertEqual(rally_core.main(["agy", "--prompt", "text", *flags]), 2)
         self.assertFalse(self.root.exists())
 
     def test_cli_help_documents_autonomous_permission_policy(self):
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
-            self.assertEqual(agent_job.main(["--help"]), 0)
+            self.assertEqual(rally_core.main(["--help"]), 0)
         self.assertIn("bypass", output.getvalue())
 
 
@@ -565,12 +581,12 @@ class AgentJobPrivacyRegressionTests(unittest.TestCase):
         if results_path.is_file():
             content = results_path.read_text(encoding="utf-8")
             # Check agent-job acceptance lines (around lines 110-160)
-            agent_job_section = "\n".join(
+            rally_core_section = "\n".join(
                 line for line in content.splitlines()
                 if any(k in line for k in ("AGY Flash", "Copilot auto", "Codex low", "Claude Haiku", "concurrency acceptance", "TASK7_"))
             )
-            self.assertNotRegex(agent_job_section, uuid_pattern, "mac-mvp-results.md agent-job section contains live UUIDs")
-            self.assertNotIn("claude.ai/settings/billing", agent_job_section)
+            self.assertNotRegex(rally_core_section, uuid_pattern, "mac-mvp-results.md agent-job section contains live UUIDs")
+            self.assertNotIn("claude.ai/settings/billing", rally_core_section)
 
 
 class AgentJobDoctorTests(unittest.TestCase):
@@ -613,7 +629,7 @@ class AgentJobDoctorTests(unittest.TestCase):
     def cli(self, *arguments):
         output, errors = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
-            code = agent_job.main(list(arguments))
+            code = rally_core.main(list(arguments))
         return code, output.getvalue(), errors.getvalue()
 
     def doctor(self, *providers):
@@ -696,9 +712,9 @@ class AgentJobDoctorTests(unittest.TestCase):
 
     def test_claude_deeply_nested_auth_is_sanitized_unavailable(self):
         output = b"[" * 1500 + b'"credential-sentinel-never-print"' + b"]" * 1500
-        self.assertLessEqual(len(output), agent_job.DOCTOR_OUTPUT_LIMIT)
-        with mock.patch.object(agent_job.shutil, "which", return_value="/fake/claude"), mock.patch.object(
-            agent_job, "_bounded_probe", side_effect=[(b"2.1.311 (Claude Code)\n", 0, None), (output, 0, None)]
+        self.assertLessEqual(len(output), rally_core.DOCTOR_OUTPUT_LIMIT)
+        with mock.patch.object(rally_core.shutil, "which", return_value="/fake/claude"), mock.patch.object(
+            rally_core, "_bounded_probe", side_effect=[(b"2.1.311 (Claude Code)\n", 0, None), (output, 0, None)]
         ) as probe:
             try:
                 entry = self.doctor("claude")["claude"]
@@ -735,7 +751,7 @@ class AgentJobDoctorTests(unittest.TestCase):
         child_pid = self.workspace / "child.pid"
         child = "import os,time;open(" + repr(str(child_pid)) + ",'w').write(str(os.getpid()));time.sleep(30)"
         self.executable("agy", version_body="subprocess.Popen([sys.executable, '-c', " + repr(child) + "])\ntime.sleep(30)")
-        with mock.patch.object(agent_job, "DOCTOR_TIMEOUT_SECONDS", 0.4, create=True):
+        with mock.patch.object(rally_core, "DOCTOR_TIMEOUT_SECONDS", 0.4, create=True):
             entry = self.doctor("agy")["agy"]
         self.assertEqual(entry["status"], "UNAVAILABLE")
         self.assertIn("timed out", entry["reason"])
@@ -746,7 +762,7 @@ class AgentJobDoctorTests(unittest.TestCase):
 
     def test_auth_probe_uses_same_output_and_time_bounds(self):
         self.executable("claude", auth_body="time.sleep(30)")
-        with mock.patch.object(agent_job, "DOCTOR_TIMEOUT_SECONDS", 0.2, create=True):
+        with mock.patch.object(rally_core, "DOCTOR_TIMEOUT_SECONDS", 0.2, create=True):
             entry = self.doctor("claude")["claude"]
         self.assertEqual(entry["status"], "UNAVAILABLE")
         self.assertIn("timed out", entry["reason"])
@@ -769,7 +785,7 @@ class AgentJobDoctorTests(unittest.TestCase):
         self.assertFalse(self.capture.exists())
 
     def test_bounded_probe_skips_killpg_when_birth_is_missing_or_mismatched(self):
-        from agent_job.cli import _bounded_probe
+        from rally_core.cli import _bounded_probe
         child_pid_file = self.workspace / "probe_child.pid"
         script = f"import os, time; open({str(child_pid_file)!r}, 'w').write(str(os.getpid())); time.sleep(5)"
 
@@ -781,17 +797,17 @@ class AgentJobDoctorTests(unittest.TestCase):
                     pass
 
         self.addCleanup(cleanup_child)
-        with mock.patch("agent_job.cli.os.killpg") as mock_killpg, \
-             mock.patch("agent_job.cli._process_birth", return_value=None):
-            with mock.patch("agent_job.cli.DOCTOR_TIMEOUT_SECONDS", 0.05):
+        with mock.patch("rally_core.cli.os.killpg") as mock_killpg, \
+             mock.patch("rally_core.cli._process_birth", return_value=None):
+            with mock.patch("rally_core.cli.DOCTOR_TIMEOUT_SECONDS", 0.05):
                 out, code, err = _bounded_probe([sys.executable, "-c", script])
                 self.assertEqual(err, "timed out")
                 self.assertFalse(mock_killpg.called, "os.killpg must not be called when birth is missing")
         cleanup_child()
 
-        with mock.patch("agent_job.cli.os.killpg") as mock_killpg, \
-             mock.patch("agent_job.cli._process_birth", side_effect=["initial-birth", "reused-pid-birth"]):
-            with mock.patch("agent_job.cli.DOCTOR_TIMEOUT_SECONDS", 0.05):
+        with mock.patch("rally_core.cli.os.killpg") as mock_killpg, \
+             mock.patch("rally_core.cli._process_birth", side_effect=["initial-birth", "reused-pid-birth"]):
+            with mock.patch("rally_core.cli.DOCTOR_TIMEOUT_SECONDS", 0.05):
                 out, code, err = _bounded_probe([sys.executable, "-c", script])
                 self.assertEqual(err, "timed out")
                 self.assertFalse(mock_killpg.called, "os.killpg must not be called when birth is mismatched")
@@ -824,7 +840,7 @@ class FixtureAdapter:
             raw_path = kwargs.get("raw_path", args[0])
             exit_code = kwargs.get("exit_code", 0)
         data = json.loads(Path(raw_path).read_text())
-        return agent_job.ProviderOutcome(
+        return rally_core.ProviderOutcome(
             data["success"], data["response"], data.get("session_id"),
             data.get("usage", {}), data.get("error"), data.get("model"), data,
         )
@@ -835,7 +851,7 @@ class AgentJobLifecycleTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.workspace = Path(self.temp.name).resolve()
-        self.store = agent_job.JobStore(self.workspace / "jobs")
+        self.store = rally_core.JobStore(self.workspace / "jobs")
         self.fixture = self.workspace / "fixture.py"
         self.fixture.write_text(
             "import json, os, signal, sys, time\n"
@@ -857,7 +873,7 @@ class AgentJobLifecycleTests(unittest.TestCase):
         })
         self.environment.start()
         self.addCleanup(self.environment.stop)
-        self.manager = agent_job.JobManager(self.store, adapters={"_fixture": FixtureAdapter()})
+        self.manager = rally_core.JobManager(self.store, adapters={"_fixture": FixtureAdapter()})
         self.addCleanup(self.stop_remaining)
 
     def stop_remaining(self):
@@ -867,7 +883,7 @@ class AgentJobLifecycleTests(unittest.TestCase):
     def request(self, **changes):
         fields = dict(provider="_fixture", prompt="private prompt", cwd=self.workspace)
         fields.update(changes)
-        return agent_job.JobRequest(**fields)
+        return rally_core.JobRequest(**fields)
 
     def start(self, **environment):
         with mock.patch.dict(os.environ, environment):
@@ -949,7 +965,7 @@ class AgentJobLifecycleTests(unittest.TestCase):
             signals.append(sig)
             return original_killpg(pgid, sig)
 
-        with mock.patch.object(agent_job.os, "killpg", side_effect=killpg):
+        with mock.patch.object(rally_core.os, "killpg", side_effect=killpg):
             started = time.monotonic()
             result = self.manager.stop(job_id)
         self.assertEqual(result["status"], "STOPPED")
@@ -973,7 +989,7 @@ class AgentJobLifecycleTests(unittest.TestCase):
             signals.append(sig)
             return original_killpg(pgid, sig)
 
-        with mock.patch.object(agent_job.os, "killpg", side_effect=killpg):
+        with mock.patch.object(rally_core.os, "killpg", side_effect=killpg):
             started = time.monotonic()
             self.assertEqual(self.manager.stop(job_id)["status"], "STOPPED")
         self.assertEqual(signals, [signal.SIGTERM])
@@ -986,7 +1002,7 @@ class AgentJobLifecycleTests(unittest.TestCase):
         token = json.loads((job.directory / "worker.json").read_text())["token"]
         self.assertEqual(self.manager.stop(job_id)["status"], "STOPPED")
         with mock.patch.object(FixtureAdapter, "build_command", side_effect=AssertionError("provider launched")):
-            self.assertEqual(agent_job.worker_main(self.store.root, job_id, token, adapters={"_fixture": FixtureAdapter()}), 130)
+            self.assertEqual(rally_core.worker_main(self.store.root, job_id, token, adapters={"_fixture": FixtureAdapter()}), 130)
         self.assertEqual((job.directory / "stdout.jsonl").read_text(), "")
 
     def test_dead_worker_reconciles_into_durable_error_after_launch_grace(self):
@@ -1005,8 +1021,8 @@ class AgentJobLifecycleTests(unittest.TestCase):
         path = self.store.get(job_id).directory / "worker.json"
         identity = json.loads(path.read_text())
         identity.update(pid=os.getpid(), pgid=os.getpgrp(), executable=sys.executable)
-        agent_job.atomic_write(path, json.dumps(identity))
-        with mock.patch.object(agent_job.os, "killpg") as killpg:
+        rally_core.atomic_write(path, json.dumps(identity))
+        with mock.patch.object(rally_core.os, "killpg") as killpg:
             self.assertEqual(self.manager.stop(job_id)["status"], "STOPPED")
         killpg.assert_not_called()
 
@@ -1017,7 +1033,7 @@ class AgentJobLifecycleTests(unittest.TestCase):
         identity = json.loads((job.directory / "worker.json").read_text())
         identity.update(pid=12345, birth="mock-birth", executable=sys.executable)
         valid_command = [sys.executable, str(RUNNER), "--_worker", str(self.store.root), job_id, identity["token"]]
-        with mock.patch.object(agent_job, "_process_birth", return_value="mock-birth"), \
+        with mock.patch.object(rally_core, "_process_birth", return_value="mock-birth"), \
              mock.patch.object(self.manager, "_process_argv", return_value=valid_command):
             self.assertTrue(self.manager._owns_worker(job, identity))
         for command in (
@@ -1025,7 +1041,7 @@ class AgentJobLifecycleTests(unittest.TestCase):
             [sys.executable, str(RUNNER), "--_worker", str(self.store.root), job_id, identity["token"] + "suffix"],
         ):
             with self.subTest(command=command), \
-                 mock.patch.object(agent_job, "_process_birth", return_value="mock-birth"), \
+                 mock.patch.object(rally_core, "_process_birth", return_value="mock-birth"), \
                  mock.patch.object(self.manager, "_process_argv", return_value=command):
                 self.assertFalse(self.manager._owns_worker(job, identity))
 
@@ -1041,7 +1057,7 @@ class AgentJobLifecycleTests(unittest.TestCase):
             path.unlink()
             path.symlink_to(target)
             token = json.loads((job.directory / "worker.json").read_text())["token"]
-            agent_job.worker_main(self.store.root, job_id, token, adapters={"_fixture": FixtureAdapter()})
+            rally_core.worker_main(self.store.root, job_id, token, adapters={"_fixture": FixtureAdapter()})
             with self.subTest(name=name):
                 self.assertEqual(target.read_text(), "outside remains unchanged\n")
                 self.assertEqual(target.stat().st_mode & 0o777, 0o640)
@@ -1060,7 +1076,7 @@ class AgentJobLifecycleTests(unittest.TestCase):
                 path.unlink()
                 path.symlink_to(target)
                 token = json.loads((job.directory / "worker.json").read_text())["token"]
-                with self.subTest(launcher=launcher, name=name), mock.patch.dict(os.environ, {"AGENT_JOB_LAUNCHER": launcher}), mock.patch.object(agent_job.subprocess, "Popen") as popen, mock.patch.object(agent_job.subprocess, "run") as run:
+                with self.subTest(launcher=launcher, name=name), mock.patch.dict(os.environ, {"AGENT_JOB_LAUNCHER": launcher}), mock.patch.object(rally_core.subprocess, "Popen") as popen, mock.patch.object(rally_core.subprocess, "run") as run:
                     with self.assertRaises((OSError, ValueError)):
                         self.manager._launch(job, token)
                     popen.assert_not_called()
@@ -1080,9 +1096,9 @@ class AgentJobLifecycleTests(unittest.TestCase):
             previous_umask = os.umask(0)
             try:
                 if mode == "provider":
-                    agent_job.worker_main(self.store.root, job_id, token, adapters={"_fixture": FixtureAdapter()})
+                    rally_core.worker_main(self.store.root, job_id, token, adapters={"_fixture": FixtureAdapter()})
                 else:
-                    with mock.patch.dict(os.environ, {"AGENT_JOB_LAUNCHER": mode}), mock.patch.object(agent_job.subprocess, "Popen"), mock.patch.object(agent_job.subprocess, "run"):
+                    with mock.patch.dict(os.environ, {"AGENT_JOB_LAUNCHER": mode}), mock.patch.object(rally_core.subprocess, "Popen"), mock.patch.object(rally_core.subprocess, "run"):
                         self.manager._launch(job, token)
             finally:
                 os.umask(previous_umask)
@@ -1101,15 +1117,15 @@ class AgentJobLifecycleTests(unittest.TestCase):
             "import os, sys, time\n"
             "from pathlib import Path\n"
             "sys.path.insert(0, sys.argv[1])\n"
-            "import agent_job\n"
-            "original = agent_job._FixtureAdapter.parse\n"
+            "import rally_core\n"
+            "original = rally_core._FixtureAdapter.parse\n"
             "def parse(self, *args, **kwargs):\n"
             " Path(sys.argv[5]).write_text('entered')\n"
             " while not Path(sys.argv[6]).exists(): time.sleep(0.01)\n"
             " if sys.argv[7] == 'error': raise ValueError('parse barrier error')\n"
             " return original(self, *args, **kwargs)\n"
-            "agent_job._FixtureAdapter.parse = parse\n"
-            "sys.exit(agent_job.worker_main(Path(sys.argv[2]), sys.argv[3], sys.argv[4]))\n"
+            "rally_core._FixtureAdapter.parse = parse\n"
+            "sys.exit(rally_core.worker_main(Path(sys.argv[2]), sys.argv[3], sys.argv[4]))\n"
         )
         with mock.patch.dict(os.environ, {"FIXTURE_DESCENDANT_READY": str(descendant)}):
             child = subprocess.Popen([sys.executable, "-c", source, str(RUNNER.parent), str(self.store.root), job_id, token, str(entered), str(release), "error" if parse_error else "success"], start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -1136,7 +1152,7 @@ class AgentJobLifecycleTests(unittest.TestCase):
             self.eventually(descendant.exists)
             releaser = threading.Thread(target=release_parser)
             releaser.start()
-            with mock.patch.object(self.manager, "_process_argv", side_effect=process_argv), mock.patch.object(agent_job.os, "killpg", side_effect=killpg):
+            with mock.patch.object(self.manager, "_process_argv", side_effect=process_argv), mock.patch.object(rally_core.os, "killpg", side_effect=killpg):
                 self.assertEqual(self.manager.stop(job_id)["status"], "STOPPED")
             releaser.join(timeout=2)
             self.assertEqual(signals, [signal.SIGTERM, signal.SIGKILL])
@@ -1163,11 +1179,11 @@ class AgentJobLifecycleTests(unittest.TestCase):
         executable = "/Library/Frameworks/Python.framework/Resources/Python.app/Contents/MacOS/Python"
         identity.update(pid=12345, birth="mock-birth", executable=executable)
         command = [executable, str(RUNNER), "--_worker", str(self.store.root), job_id, identity["token"]]
-        with mock.patch.object(agent_job, "_process_birth", return_value="mock-birth"), \
+        with mock.patch.object(rally_core, "_process_birth", return_value="mock-birth"), \
              mock.patch.object(self.manager, "_process_argv", return_value=command):
             self.assertTrue(self.manager._owns_worker(job, identity))
         identity["executable"] = "/unrelated/python"
-        with mock.patch.object(agent_job, "_process_birth", return_value="mock-birth"), \
+        with mock.patch.object(rally_core, "_process_birth", return_value="mock-birth"), \
              mock.patch.object(self.manager, "_process_argv", return_value=command):
             self.assertFalse(self.manager._owns_worker(job, identity))
 
@@ -1176,7 +1192,7 @@ class AgentJobLifecycleTests(unittest.TestCase):
             job_id = self.manager.start(self.request())["job_id"]
         job = self.store.get(job_id)
         before = (job.directory / "worker.json").read_bytes()
-        self.assertEqual(agent_job.worker_main(self.store.root, job_id, "wrong", adapters={"_fixture": FixtureAdapter()}), 2)
+        self.assertEqual(rally_core.worker_main(self.store.root, job_id, "wrong", adapters={"_fixture": FixtureAdapter()}), 2)
         self.assertEqual((job.directory / "worker.json").read_bytes(), before)
         self.assertEqual((job.directory / "state").read_text().strip(), "STARTING")
 
@@ -1186,7 +1202,7 @@ class AgentJobLifecycleTests(unittest.TestCase):
         job = self.store.get(job_id)
         barrier = threading.Barrier(2)
         results, failures = [], []
-        original = agent_job.atomic_write
+        original = rally_core.atomic_write
         published = []
 
         def write(path, text):
@@ -1204,7 +1220,7 @@ class AgentJobLifecycleTests(unittest.TestCase):
             except Exception as error:
                 failures.append(error)
 
-        with mock.patch.object(agent_job, "atomic_write", side_effect=write):
+        with mock.patch.object(rally_core, "atomic_write", side_effect=write):
             threads = [threading.Thread(target=finalize, args=(code,)) for code in (1, 2)]
             for thread in threads: thread.start()
             for thread in threads: thread.join(timeout=5)
@@ -1224,11 +1240,11 @@ class AgentJobLifecycleTests(unittest.TestCase):
             if kind == "truncated":
                 context = mock.patch.dict(os.environ, {"FIXTURE_MALFORMED": "1"})
             elif kind == "wrong-shape":
-                context = mock.patch.object(adapter, "parse", return_value=agent_job.ProviderOutcome(True, None, None, {}, None, None, {}))
+                context = mock.patch.object(adapter, "parse", return_value=rally_core.ProviderOutcome(True, None, None, {}, None, None, {}))
             else:
                 context = mock.patch.object(adapter, "parse", side_effect=ValueError("bad output"))
             with context:
-                self.assertNotEqual(agent_job.worker_main(self.store.root, job_id, token, adapters={"_fixture": adapter}), 0)
+                self.assertNotEqual(rally_core.worker_main(self.store.root, job_id, token, adapters={"_fixture": adapter}), 0)
             result = self.manager.wait(job_id)
             self.assertEqual(result["status"], "ERROR")
             self.assertEqual(result["error"]["type"], "parse_error")
@@ -1295,7 +1311,7 @@ class AgentJobLifecycleTests(unittest.TestCase):
         with mock.patch.object(self.manager, "_launch"):
             job_id = self.manager.start(self.request())["job_id"]
         job = self.store.get(job_id)
-        original_write = agent_job.atomic_write
+        original_write = rally_core.atomic_write
         reached, release, finalized = threading.Event(), threading.Event(), threading.Event()
         results = []
 
@@ -1309,7 +1325,7 @@ class AgentJobLifecycleTests(unittest.TestCase):
             self.manager.finalize(job_id, status="ERROR", exit_code=1)
             finalized.set()
 
-        with mock.patch.object(agent_job, "atomic_write", side_effect=write):
+        with mock.patch.object(rally_core, "atomic_write", side_effect=write):
             stop_thread = threading.Thread(target=lambda: results.append(self.manager.stop(job_id)))
             stop_thread.start()
             self.assertTrue(reached.wait(timeout=2))
@@ -1325,7 +1341,7 @@ class AgentJobLifecycleTests(unittest.TestCase):
         self.assertEqual(self.manager.status(job_id)["status"], result["status"])
 
     def test_detached_job_root_with_spaces_preserves_worker_ownership(self):
-        self.manager = agent_job.JobManager(agent_job.JobStore(self.workspace / "jobs with spaces"), adapters={"_fixture": FixtureAdapter()})
+        self.manager = rally_core.JobManager(rally_core.JobStore(self.workspace / "jobs with spaces"), adapters={"_fixture": FixtureAdapter()})
         self.store = self.manager.store
         job_id = self.start(FIXTURE_DELAY="0.4")["job_id"]
         self.eventually(lambda: self.manager.status(job_id)["status"] == "RUNNING")
@@ -1357,7 +1373,7 @@ class AgentJobLifecycleTests(unittest.TestCase):
         os.kill(identity["pid"], signal.SIGKILL)
         self.manager._children[job_id].wait(timeout=2)
         self.manager.launch_grace = 0
-        original_killpg, original_write = os.killpg, agent_job.atomic_write
+        original_killpg, original_write = os.killpg, rally_core.atomic_write
         signals, active_at_publication = [], []
 
         def active_pids():
@@ -1379,7 +1395,7 @@ class AgentJobLifecycleTests(unittest.TestCase):
 
         try:
             self.assertEqual(active_pids(), provider_pids)
-            with mock.patch.object(agent_job.os, "killpg", side_effect=killpg), mock.patch.object(agent_job, "atomic_write", side_effect=write):
+            with mock.patch.object(rally_core.os, "killpg", side_effect=killpg), mock.patch.object(rally_core, "atomic_write", side_effect=write):
                 self.assertEqual(self.manager.status(job_id)["status"], "ERROR")
             self.assertEqual(signals, [(identity["provider_pgid"], signal.SIGTERM), (identity["provider_pgid"], signal.SIGKILL)])
             self.assertEqual(active_at_publication, [[]])
@@ -1403,9 +1419,9 @@ class AgentJobLifecycleTests(unittest.TestCase):
                 identity.update(pid=child.pid, pgid=child.pid, provider_pgid=child.pid, runner=str(RUNNER), executable=str(Path(sys.executable).resolve()), provider_command=[sys.executable, "-c", "unrelated"])
                 identity["provider_process"] = {"pid": child.pid, "birth": "stale-boot:1", "token": identity["token"], "executable": identity["executable"]}
                 identity.update(changes)
-                agent_job.atomic_write(job.directory / "worker.json", json.dumps(identity))
+                rally_core.atomic_write(job.directory / "worker.json", json.dumps(identity))
                 self.manager.launch_grace = 0
-                with self.subTest(changes=changes), mock.patch.object(agent_job.os, "killpg") as killpg:
+                with self.subTest(changes=changes), mock.patch.object(rally_core.os, "killpg") as killpg:
                     self.assertEqual(self.manager.status(job_id)["status"], "ERROR")
                     killpg.assert_not_called()
                     self.assertIsNone(child.poll())
@@ -1422,11 +1438,11 @@ class AgentJobLifecycleTests(unittest.TestCase):
         job = self.store.get(job_id)
         identity = json.loads((job.directory / "worker.json").read_text())
         identity.update(pid=child.pid, pgid=child.pid, provider_pgid=child.pid, runner=str(RUNNER), executable=str(Path(sys.executable).resolve()), provider_command=[sys.executable, "-c", "unrelated"])
-        identity["provider_process"] = {"pid": child.pid, "birth": agent_job._process_birth(child.pid), "token": identity["token"], "executable": identity["executable"]}
-        agent_job.atomic_write(job.directory / "worker.json", json.dumps(identity))
+        identity["provider_process"] = {"pid": child.pid, "birth": rally_core._process_birth(child.pid), "token": identity["token"], "executable": identity["executable"]}
+        rally_core.atomic_write(job.directory / "worker.json", json.dumps(identity))
         self.manager.launch_grace = 0
         try:
-            with mock.patch.object(agent_job.os, "killpg", wraps=os.killpg) as killpg:
+            with mock.patch.object(rally_core.os, "killpg", wraps=os.killpg) as killpg:
                 self.assertEqual(self.manager.status(job_id)["status"], "ERROR")
                 killpg.assert_not_called()
             self.assertIsNone(child.poll())
@@ -1445,12 +1461,12 @@ class AgentJobLifecycleTests(unittest.TestCase):
         child = subprocess.Popen([sys.executable, "-c", "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); print('ready', flush=True); time.sleep(30)", field], env={}, start_new_session=True, stdout=subprocess.PIPE, text=True)
         self.assertEqual(child.stdout.readline().strip(), "ready")
         identity.update(pid=child.pid, pgid=child.pid, provider_pgid=child.pid, runner=str(RUNNER), executable=str(Path(sys.executable).resolve()), provider_command=[sys.executable, "-c", "unrelated"])
-        identity["provider_process"] = {"pid": child.pid, "birth": agent_job._process_birth(child.pid), "token": identity["token"], "executable": identity["executable"]}
-        agent_job.atomic_write(job.directory / "worker.json", json.dumps(identity))
+        identity["provider_process"] = {"pid": child.pid, "birth": rally_core._process_birth(child.pid), "token": identity["token"], "executable": identity["executable"]}
+        rally_core.atomic_write(job.directory / "worker.json", json.dumps(identity))
         self.manager.launch_grace = 0
         try:
             self.assertFalse(self.manager._process_has_job_token(child.pid, identity["token"]))
-            with mock.patch.object(agent_job.os, "killpg", wraps=os.killpg) as killpg:
+            with mock.patch.object(rally_core.os, "killpg", wraps=os.killpg) as killpg:
                 self.assertEqual(self.manager.status(job_id)["status"], "ERROR")
                 killpg.assert_not_called()
             self.assertIsNone(child.poll())
@@ -1474,7 +1490,7 @@ class AgentJobLifecycleTests(unittest.TestCase):
             return original_killpg(pgid, sig)
 
         try:
-            with mock.patch.object(agent_job.os, "killpg", side_effect=killpg):
+            with mock.patch.object(rally_core.os, "killpg", side_effect=killpg):
                 self.assertEqual(self.manager.stop(job_id)["status"], "STOPPED")
             self.assertEqual(signals, [signal.SIGTERM, signal.SIGKILL])
             state = subprocess.run(["ps", "-p", ready.read_text(), "-o", "stat="], capture_output=True, text=True).stdout.strip()
@@ -1502,7 +1518,7 @@ class AgentJobLifecycleTests(unittest.TestCase):
             return original_killpg(pgid, sig)
 
         try:
-            with mock.patch.object(agent_job.os, "killpg", side_effect=killpg):
+            with mock.patch.object(rally_core.os, "killpg", side_effect=killpg):
                 self.assertEqual(self.manager.status(job_id)["status"], "ERROR")
             self.assertEqual(signals, [signal.SIGTERM, signal.SIGKILL])
             state = subprocess.run(["ps", "-p", ready.read_text(), "-o", "stat="], capture_output=True, text=True).stdout.strip()
@@ -1529,15 +1545,15 @@ class AgentJobLifecycleTests(unittest.TestCase):
             job_id = self.manager.start(self.request())["job_id"]
         job = self.store.get(job_id)
         token = json.loads((job.directory / "worker.json").read_text())["token"]
-        original_write, identities_at_running = agent_job.atomic_write, []
+        original_write, identities_at_running = rally_core.atomic_write, []
 
         def write(path, content):
             if Path(path).name == "state" and content == "RUNNING\n":
                 identities_at_running.append(bool(json.loads((job.directory / "worker.json").read_text()).get("provider_process")))
             return original_write(path, content)
 
-        with mock.patch.object(agent_job, "atomic_write", side_effect=write):
-            self.assertEqual(agent_job.worker_main(self.store.root, job_id, token, adapters={"_fixture": FixtureAdapter()}), 0)
+        with mock.patch.object(rally_core, "atomic_write", side_effect=write):
+            self.assertEqual(rally_core.worker_main(self.store.root, job_id, token, adapters={"_fixture": FixtureAdapter()}), 0)
         self.assertEqual(identities_at_running, [True])
 
     def test_terminal_success_and_error_drain_background_children_and_sentinel(self):
@@ -1648,7 +1664,7 @@ class AgentJobLifecycleTests(unittest.TestCase):
         self.sentinel_without_manager(with_child=True)
 
     def test_launchctl_command_contains_absolute_runner_and_token(self):
-        with mock.patch.dict(os.environ, {"AGENT_JOB_LAUNCHER": "launchctl"}), mock.patch.object(agent_job.subprocess, "run") as run:
+        with mock.patch.dict(os.environ, {"AGENT_JOB_LAUNCHER": "launchctl"}), mock.patch.object(rally_core.subprocess, "run") as run:
             run.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
             job_id = self.manager.start(self.request())["job_id"]
         command = run.call_args.args[0]
@@ -1659,7 +1675,7 @@ class AgentJobLifecycleTests(unittest.TestCase):
         self.assertEqual(command[command.index("--_worker") + 1:][:2], [str(self.store.root), job_id])
 
     def test_launchctl_environment_is_private_token_checked_and_consumed_before_provider(self):
-        with mock.patch.dict(os.environ, {"AGENT_JOB_LAUNCHER": "launchctl", "FIXTURE_RESPONSE": "caller response", "FIXTURE_SECRET": "private environment value"}), mock.patch.object(agent_job.subprocess, "run") as run:
+        with mock.patch.dict(os.environ, {"AGENT_JOB_LAUNCHER": "launchctl", "FIXTURE_RESPONSE": "caller response", "FIXTURE_SECRET": "private environment value"}), mock.patch.object(rally_core.subprocess, "run") as run:
             run.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
             job_id = self.manager.start(self.request())["job_id"]
         job = self.store.get(job_id)
@@ -1677,11 +1693,11 @@ class AgentJobLifecycleTests(unittest.TestCase):
             return original_build(request)
 
         with mock.patch.dict(os.environ, {}, clear=True):
-            self.assertEqual(agent_job.worker_main(self.store.root, job_id, "wrong", adapters={"_fixture": adapter}), 2)
+            self.assertEqual(rally_core.worker_main(self.store.root, job_id, "wrong", adapters={"_fixture": adapter}), 2)
             self.assertTrue(environment_file.exists())
             self.assertNotIn("FIXTURE_SECRET", os.environ)
             with mock.patch.object(adapter, "build_command", side_effect=build):
-                self.assertEqual(agent_job.worker_main(self.store.root, job_id, token, adapters={"_fixture": adapter}), 0)
+                self.assertEqual(rally_core.worker_main(self.store.root, job_id, token, adapters={"_fixture": adapter}), 0)
         self.assertEqual(self.manager.read(job_id), "caller response")
         self.assertNotIn("private environment value", json.dumps(self.manager.wait(job_id)))
 
@@ -1807,10 +1823,10 @@ class AgentJobLifecycleTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"AGENT_JOB_LAUNCHER": "launchctl"}), mock.patch.object(self.manager, "_launch"):
             job_id = self.manager.start(self.request())["job_id"]
         job = self.store.get(job_id)
-        agent_job.atomic_write(job.directory / "launch-environment.json", json.dumps({"BAD": "value\0invalid"}))
+        rally_core.atomic_write(job.directory / "launch-environment.json", json.dumps({"BAD": "value\0invalid"}))
         token = json.loads((job.directory / "worker.json").read_text())["token"]
         with mock.patch.object(FixtureAdapter, "build_command", side_effect=AssertionError("provider launched")):
-            self.assertNotEqual(agent_job.worker_main(self.store.root, job_id, token, adapters={"_fixture": FixtureAdapter()}), 0)
+            self.assertNotEqual(rally_core.worker_main(self.store.root, job_id, token, adapters={"_fixture": FixtureAdapter()}), 0)
         self.assertEqual(self.manager.wait(job_id)["status"], "ERROR")
         self.assertFalse((job.directory / "launch-environment.json").exists())
 
@@ -1864,7 +1880,7 @@ class AgentJobLifecycleTests(unittest.TestCase):
             return original_killpg(pgid, sig)
 
         try:
-            with mock.patch.object(agent_job.os, "killpg", side_effect=killpg):
+            with mock.patch.object(rally_core.os, "killpg", side_effect=killpg):
                 self.assertEqual(self.manager.stop(job_id)["status"], "STOPPED")
             self.assertEqual(signals, [signal.SIGTERM, signal.SIGKILL])
         finally:
@@ -1877,12 +1893,12 @@ class AgentJobLifecycleTests(unittest.TestCase):
         job_id = self.start(FIXTURE_DELAY="0.2", FIXTURE_RESPONSE="answer\nwith newline")["job_id"]
         output = io.StringIO()
         with mock.patch.dict(os.environ, {"AGENT_JOB_DIR": str(self.store.root)}), contextlib.redirect_stdout(output):
-            code = agent_job.main(["wait", job_id])
+            code = rally_core.main(["wait", job_id])
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(output.getvalue())["response"], "answer\nwith newline")
         output = io.StringIO()
         with mock.patch.dict(os.environ, {"AGENT_JOB_DIR": str(self.store.root)}), contextlib.redirect_stdout(output):
-            code = agent_job.main(["read", job_id])
+            code = rally_core.main(["read", job_id])
         self.assertEqual(code, 0)
         self.assertEqual(output.getvalue(), "answer\nwith newline")
 
@@ -1892,19 +1908,19 @@ class AgentJobLifecycleTests(unittest.TestCase):
         for arguments, expected_code in ((["wait", job_id, "--timeout", "0"], 124), (["status", job_id], 0), (["list", "--cwd", str(self.workspace)], 0), (["stop", job_id], 130)):
             output = io.StringIO()
             with self.subTest(arguments=arguments), mock.patch.dict(os.environ, {"AGENT_JOB_DIR": str(self.store.root)}), contextlib.redirect_stdout(output):
-                self.assertEqual(agent_job.main(arguments), expected_code)
+                self.assertEqual(rally_core.main(arguments), expected_code)
             value = json.loads(output.getvalue())
             self.assertEqual((value[0] if isinstance(value, list) else value)["job_id"], job_id)
 
     def test_cli_rejects_invalid_management_arguments_without_creating_root(self):
         for arguments in (["wait", "../outside"], ["wait", "20261027T120000Z-abcdef123456", "--timeout", "nan"], ["status"], ["read", "../outside"], ["stop", "../outside"]):
             with self.subTest(arguments=arguments), mock.patch.dict(os.environ, {"AGENT_JOB_DIR": str(self.store.root)}), contextlib.redirect_stderr(io.StringIO()):
-                self.assertEqual(agent_job.main(arguments), 2)
+                self.assertEqual(rally_core.main(arguments), 2)
         self.assertFalse(self.store.root.exists())
 
     def test_private_fixture_is_unavailable_without_explicit_test_environment(self):
         with mock.patch.dict(os.environ, {}, clear=True):
-            self.assertNotIn("_fixture", agent_job.provider_adapters())
+            self.assertNotIn("_fixture", rally_core.provider_adapters())
             with self.assertRaises(ValueError):
                 self.request()
 
@@ -1917,7 +1933,7 @@ class AgentJobLifecycleTests(unittest.TestCase):
         self.assertTrue(bool(state) and not state.startswith("Z"), f"process {pid} is dead or zombie: {state}")
 
     def assertProcessTreeGone(self, pgid: int) -> None:
-        self.assertFalse(agent_job._group_has_members(pgid), f"process group {pgid} still has members")
+        self.assertFalse(rally_core._group_has_members(pgid), f"process group {pgid} still has members")
 
     def test_corrupt_metadata_reconciles_to_durable_error_and_cleans_launch_env(self):
         with mock.patch.object(self.manager, "_launch"):
@@ -2001,7 +2017,7 @@ class AgentJobLifecycleTests(unittest.TestCase):
         self.assertEqual(result["status"], "STOPPED")
         self.assertFalse(os.path.exists(job.launch_env))
         with mock.patch.object(FixtureAdapter, "build_command", side_effect=AssertionError("provider launched")):
-            self.assertEqual(agent_job.worker_main(self.store.root, job_id, token, adapters={"_fixture": FixtureAdapter()}), 130)
+            self.assertEqual(rally_core.worker_main(self.store.root, job_id, token, adapters={"_fixture": FixtureAdapter()}), 130)
         self.assertEqual((job.directory / "stdout.jsonl").read_text(), "")
         self.assertEqual(self.manager.result(job)["status"], "STOPPED")
 
@@ -2033,7 +2049,7 @@ class AgentJobLifecycleTests(unittest.TestCase):
         job.launch_env.write_text(json.dumps({"KEY": "SECRET"}))
         identity = json.loads((job.directory / "worker.json").read_text())
         identity.update(pid=unrelated_pid, pgid=unrelated_pid, executable=sys.executable)
-        agent_job.atomic_write(job.directory / "worker.json", json.dumps(identity))
+        rally_core.atomic_write(job.directory / "worker.json", json.dumps(identity))
 
         self.manager.launch_grace = 0
         summary = self.manager.status(job_id)
@@ -2088,13 +2104,13 @@ class AgentJobLifecycleTests(unittest.TestCase):
         identity = json.loads(job.worker.read_text())
         identity.update(pid=unrelated_pid, pgid=unrelated_pid, executable=sys.executable)
         identity.pop("birth", None)
-        agent_job.atomic_write(job.worker, json.dumps(identity))
+        rally_core.atomic_write(job.worker, json.dumps(identity))
 
         valid_command = [sys.executable, str(RUNNER), "--_worker", str(self.store.root), job_id, identity["token"]]
         with mock.patch.object(self.manager, "_process_argv", return_value=valid_command):
             self.assertFalse(self.manager._owns_worker(job, identity))
 
-        with mock.patch.object(agent_job.os, "kill") as kill:
+        with mock.patch.object(rally_core.os, "kill") as kill:
             self.manager.stop(job_id)
             kill.assert_not_called()
         self.assertProcessAlive(unrelated_pid)
@@ -2119,10 +2135,10 @@ class AgentJobLifecycleTests(unittest.TestCase):
             provider_command=[sys.executable, "-c", "fake"],
             provider_process={"pid": unrelated_pid, "token": identity["token"], "executable": sys.executable},
         )
-        agent_job.atomic_write(job.worker, json.dumps(identity))
+        rally_core.atomic_write(job.worker, json.dumps(identity))
 
         with mock.patch.object(self.manager, "_process_has_job_token", return_value=True), \
-             mock.patch.object(agent_job.os, "killpg") as killpg:
+             mock.patch.object(rally_core.os, "killpg") as killpg:
             self.manager._cleanup_lost_group(identity)
             killpg.assert_not_called()
         self.assertProcessAlive(unrelated_pid)
@@ -2140,13 +2156,13 @@ class AgentJobLifecycleTests(unittest.TestCase):
         with mock.patch.object(self.manager, "_launch"):
             job_id = self.manager.start(self.request())["job_id"]
         job = self.store.get(job_id)
-        worker_birth = agent_job._process_birth(worker_pid)
+        worker_birth = rally_core._process_birth(worker_pid)
         identity = json.loads(job.worker.read_text())
         identity.update(
             pid=worker_pid, pgid=worker_pid, birth=worker_birth,
             executable=str(Path(sys.executable).resolve()),
         )
-        agent_job.atomic_write(job.worker, json.dumps(identity))
+        rally_core.atomic_write(job.worker, json.dumps(identity))
 
         loop_checked = False
         original_owns = self.manager._owns_worker
@@ -2155,13 +2171,13 @@ class AgentJobLifecycleTests(unittest.TestCase):
             nonlocal loop_checked
             if not loop_checked:
                 loop_checked = True
-                agent_job.atomic_write(job.worker, json.dumps({"token": identity["token"], "pid": None, "birth": None}))
+                rally_core.atomic_write(job.worker, json.dumps({"token": identity["token"], "pid": None, "birth": None}))
             return original_owns(j, ident)
 
         valid_command = [sys.executable, str(RUNNER), "--_worker", str(self.store.root), job_id, identity["token"]]
         with mock.patch.object(self.manager, "_process_argv", return_value=valid_command), \
              mock.patch.object(self.manager, "_owns_worker", side_effect=owns_hook), \
-             mock.patch.object(agent_job.os, "kill") as kill_mock:
+             mock.patch.object(rally_core.os, "kill") as kill_mock:
             self.manager.stop(job_id)
             kill_mock.assert_not_called()
 
@@ -2199,20 +2215,20 @@ class AgentJobLifecycleTests(unittest.TestCase):
         self.addCleanup(cleanup_spawned)
 
         # 1. When birth is None (missing birth), terminate must not be called
-        with mock.patch("agent_job.process.subprocess.Popen", side_effect=popen_wrapper), \
-             mock.patch("agent_job.process.subprocess.Popen.terminate") as mock_terminate, \
-             mock.patch("agent_job.process._process_birth", return_value=None):
-            code = agent_job.worker_main(self.store.root, job_id, token, adapters=self.manager.adapters)
+        with mock.patch("rally_core.process.subprocess.Popen", side_effect=popen_wrapper), \
+             mock.patch("rally_core.process.subprocess.Popen.terminate") as mock_terminate, \
+             mock.patch("rally_core.process._process_birth", return_value=None):
+            code = rally_core.worker_main(self.store.root, job_id, token, adapters=self.manager.adapters)
             self.assertEqual(code, 1)
             self.assertFalse(mock_terminate.called, "terminate must not be called when birth is missing")
         cleanup_spawned()
 
         # 2. When birth is mismatched (simulating PID reuse), terminate must not be called
-        with mock.patch("agent_job.process.subprocess.Popen", side_effect=popen_wrapper), \
-             mock.patch("agent_job.process.subprocess.Popen.terminate") as mock_terminate, \
-             mock.patch("agent_job.process._process_birth", side_effect=["initial-birth", "reused-pid-birth"]):
-            with mock.patch("agent_job.process.atomic_write", side_effect=[None, OSError("disk full")]):
-                agent_job.worker_main(self.store.root, job_id, token, adapters=self.manager.adapters)
+        with mock.patch("rally_core.process.subprocess.Popen", side_effect=popen_wrapper), \
+             mock.patch("rally_core.process.subprocess.Popen.terminate") as mock_terminate, \
+             mock.patch("rally_core.process._process_birth", side_effect=["initial-birth", "reused-pid-birth"]):
+            with mock.patch("rally_core.process.atomic_write", side_effect=[None, OSError("disk full")]):
+                rally_core.worker_main(self.store.root, job_id, token, adapters=self.manager.adapters)
                 self.assertFalse(mock_terminate.called, "terminate must not be called when birth is mismatched")
         cleanup_spawned()
 
@@ -2239,8 +2255,8 @@ class AgentJobLifecycleTests(unittest.TestCase):
 
         secret_path = "/Users/alice/private/sentinel-path/key.pem"
         error_msg = f"worker failure with {CREDENTIAL_SENTINEL} at {secret_path}"
-        with mock.patch("agent_job.process._restore_launch_environment", side_effect=ValueError(error_msg)):
-            code = agent_job.worker_main(self.store.root, job_id, token, adapters=self.manager.adapters)
+        with mock.patch("rally_core.process._restore_launch_environment", side_effect=ValueError(error_msg)):
+            code = rally_core.worker_main(self.store.root, job_id, token, adapters=self.manager.adapters)
         self.assertEqual(code, 1)
         result = self.manager.result(job)
         self.assertEqual(result["status"], "ERROR")
@@ -2373,14 +2389,14 @@ class AgyAdapterTests(unittest.TestCase):
         raw.write_text('{"status":"ERROR","error":"earlier failure"}\n'
                        '{"status":"SUCCESS","response":"final"}\n'
                        '{"status":{"diagnostic":true}}\n')
-        outcome = agent_job.AgyAdapter().parse(raw, 0)
+        outcome = rally_core.AgyAdapter().parse(raw, 0)
         self.assertTrue(outcome.success)
         self.assertEqual(outcome.response, "final")
 
     def test_bare_nonzero_exit_without_result_classifies_as_provider_exit(self):
         raw = self.workspace / "bare-exit.jsonl"
         raw.write_text("")
-        outcome = agent_job.AgyAdapter().parse(raw, 7)
+        outcome = rally_core.AgyAdapter().parse(raw, 7)
         self.assertFalse(outcome.success)
         self.assertEqual(outcome.error["type"], "provider_exit")
         self.assertEqual(outcome.error["message"], "agy exited with status 7")
@@ -2420,28 +2436,28 @@ class AgyAdapterTests(unittest.TestCase):
                 with self.subTest(kind=kind, exit_code=exit_code):
                     raw = self.workspace / "diagnostic.jsonl"
                     raw.write_text(text + "\n")
-                    outcome = agent_job.AgyAdapter().parse(raw, exit_code)
+                    outcome = rally_core.AgyAdapter().parse(raw, exit_code)
                     assert_public_failure(self, outcome, kind)
                     self.assertEqual(outcome.error["message"], f"agy {'quota' if kind == 'quota_error' else 'authentication'} unavailable")
 
     def test_assistant_text_cannot_masquerade_as_quota_diagnostics(self):
         raw = self.workspace / "assistant-quota.jsonl"
         raw.write_text('{"event":"progress","message":"usage limit unauthorized quota"}\n{"status":')
-        assert_public_failure(self, agent_job.AgyAdapter().parse(raw, 0), "parse_error")
+        assert_public_failure(self, rally_core.AgyAdapter().parse(raw, 0), "parse_error")
 
     def test_truncated_utf8_tail_and_deep_nesting_are_parse_errors_not_exceptions(self):
         raw = self.workspace / "bytes.jsonl"
         for content in (b'{"status":"SUCCESS","response":"caf\xc3', b"[" * 5000 + b"\n"):
             with self.subTest(content=content[:20]):
                 raw.write_bytes(content)
-                assert_public_failure(self, agent_job.AgyAdapter().parse(raw, 0), "parse_error")
+                assert_public_failure(self, rally_core.AgyAdapter().parse(raw, 0), "parse_error")
 
     def test_error_messages_are_redacted_single_line_and_bounded(self):
         raw = self.workspace / "long-error.jsonl"
         message = "line one\nAuthorization: Bearer credential-sentinel " + "x" * 600
         raw.write_text(json.dumps({"status": "ERROR", "error": {"message": message, "code": "api_key=credential-sentinel",
                                                                   "type": "quota", "status": 429, "stderr": "credential-sentinel"}}))
-        outcome = agent_job.AgyAdapter().parse(raw, 1)
+        outcome = rally_core.AgyAdapter().parse(raw, 1)
         assert_public_failure(self, outcome, "quota_error")
         self.assertLessEqual(len(outcome.error["message"]), 300)
         self.assertNotIn("\n", outcome.error["message"])
@@ -2507,8 +2523,8 @@ class AgyAdapterTests(unittest.TestCase):
         empty_raw = self.workspace / "empty-stdout.jsonl"
         empty_raw.write_text("")
         stderr_file = self.workspace / "test-stderr.log"
-        req = agent_job.JobRequest(provider="agy", prompt="hello", cwd=self.workspace)
-        adapter = agent_job.AgyAdapter()
+        req = rally_core.JobRequest(provider="agy", prompt="hello", cwd=self.workspace)
+        adapter = rally_core.AgyAdapter()
 
         stderr_file.write_text("Usage limit reached. Authorization: Bearer credential-sentinel\n")
         outcome = adapter.parse(req, empty_raw, stderr_file, 1)
@@ -2535,7 +2551,7 @@ class CopilotAdapterTests(unittest.TestCase):
         self.bin = self.workspace / "bin"
         self.bin.mkdir()
         self.args_file = self.workspace / "arguments.json"
-        fixtures = Path(__file__).parent / "fixtures" / "agent_job"
+        fixtures = Path(__file__).parent / "fixtures" / "rally"
         self.raw = (fixtures / "copilot-1.0.73-success.jsonl").read_text()
         self.events = [json.loads(line) for line in self.raw.splitlines()]
         self.terminal = self.events[-1]
@@ -2649,7 +2665,7 @@ class CopilotAdapterTests(unittest.TestCase):
     def test_bare_nonzero_exit_without_result_classifies_as_provider_exit(self):
         raw = self.workspace / "bare-exit.jsonl"
         raw.write_text("")
-        outcome = agent_job.CopilotAdapter().parse(raw, 7)
+        outcome = rally_core.CopilotAdapter().parse(raw, 7)
         self.assertFalse(outcome.success)
         self.assertEqual(outcome.error["type"], "provider_exit")
         self.assertEqual(outcome.error["message"], "copilot exited with status 7")
@@ -2697,7 +2713,7 @@ class CopilotAdapterTests(unittest.TestCase):
                 with self.subTest(kind=kind, exit_code=exit_code):
                     raw = self.workspace / "diagnostic.jsonl"
                     raw.write_text(text + "\n" + self.stream(self.events[:3]) + "\n")
-                    outcome = agent_job.CopilotAdapter().parse(raw, exit_code)
+                    outcome = rally_core.CopilotAdapter().parse(raw, exit_code)
                     assert_public_failure(self, outcome, kind)
                     self.assertEqual(outcome.error["message"], f"copilot {public} unavailable")
 
@@ -2706,7 +2722,7 @@ class CopilotAdapterTests(unittest.TestCase):
         for content in (self.raw.encode()[:-40] + "é".encode()[:1], b"[" * 5000 + b"\n" + self.raw.encode()[:300]):
             with self.subTest(content=content[-20:]):
                 raw.write_bytes(content)
-                assert_public_failure(self, agent_job.CopilotAdapter().parse(raw, 0), "parse_error")
+                assert_public_failure(self, rally_core.CopilotAdapter().parse(raw, 0), "parse_error")
 
     def test_error_messages_are_redacted_single_line_and_bounded(self):
         message = "line one\nAuthorization: Bearer credential-sentinel " + "x" * 600
@@ -2721,7 +2737,7 @@ class CopilotAdapterTests(unittest.TestCase):
     def parse_events(self, events, exit_code=0):
         raw = self.workspace / "events.jsonl"
         raw.write_text(self.stream(events))
-        return agent_job.CopilotAdapter().parse(raw, exit_code)
+        return rally_core.CopilotAdapter().parse(raw, exit_code)
 
     def test_zero_exit_truncated_result_is_durable_parse_error_with_recovered_session(self):
         raw = (FIXTURES / "copilot-1.0.73-truncated.jsonl").read_text()
@@ -2822,8 +2838,8 @@ class CopilotAdapterTests(unittest.TestCase):
         empty_raw = self.workspace / "empty-stdout.jsonl"
         empty_raw.write_text("")
         stderr_file = self.workspace / "test-stderr.log"
-        req = agent_job.JobRequest(provider="copilot", prompt="hello", cwd=self.workspace)
-        adapter = agent_job.CopilotAdapter()
+        req = rally_core.JobRequest(provider="copilot", prompt="hello", cwd=self.workspace)
+        adapter = rally_core.CopilotAdapter()
 
         stderr_file.write_text("Error: usage limit reached; Bearer credential-sentinel\n")
         outcome = adapter.parse(req, empty_raw, stderr_file, 1)
@@ -2849,7 +2865,7 @@ class CodexAdapterTests(unittest.TestCase):
         self.bin = self.workspace / "bin"
         self.bin.mkdir()
         self.args_file = self.workspace / "arguments.json"
-        fixtures = Path(__file__).parent / "fixtures" / "agent_job"
+        fixtures = Path(__file__).parent / "fixtures" / "rally"
         self.raw = (fixtures / "codex-0.164.0-success.jsonl").read_text()
         self.events = [json.loads(line) for line in self.raw.splitlines()]
         self.terminal = self.events[-1]
@@ -2934,10 +2950,10 @@ class CodexAdapterTests(unittest.TestCase):
                 completed = self.run_job(*flags)
                 self.assertEqual(completed.returncode, 2, completed.stderr)
                 self.assertFalse(self.root.exists())
-        adapter = agent_job.provider_adapters().get("codex")
+        adapter = rally_core.provider_adapters().get("codex")
         self.assertIsNotNone(adapter)
         with self.assertRaisesRegex(ValueError, "unsupported Codex provider options"):
-            adapter.validate(agent_job.JobRequest(provider="codex", prompt="p", cwd=self.workspace,
+            adapter.validate(rally_core.JobRequest(provider="codex", prompt="p", cwd=self.workspace,
                                                   provider_options={"unknown": True}))
 
     def test_last_completed_agent_message_wins_amid_tools_and_unrelated_diagnostics(self):
@@ -3070,7 +3086,7 @@ class CodexAdapterTests(unittest.TestCase):
                 with self.subTest(kind=kind, exit_code=exit_code):
                     raw = self.workspace / "diagnostic.jsonl"
                     raw.write_text(text + "\n" + self.stream(self.events[:2]) + "\n")
-                    outcome = agent_job.CodexAdapter().parse(raw, exit_code)
+                    outcome = rally_core.CodexAdapter().parse(raw, exit_code)
                     assert_public_failure(self, outcome, kind)
                     self.assertEqual(outcome.error["message"], f"codex {public} unavailable")
 
@@ -3079,7 +3095,7 @@ class CodexAdapterTests(unittest.TestCase):
         for content in (self.raw.encode()[:-40] + "é".encode()[:1], b"[" * 5000 + b"\n" + self.raw.encode()[:100]):
             with self.subTest(content=content[-20:]):
                 raw.write_bytes(content)
-                assert_public_failure(self, agent_job.CodexAdapter().parse(raw, 0), "parse_error")
+                assert_public_failure(self, rally_core.CodexAdapter().parse(raw, 0), "parse_error")
 
     def test_error_messages_are_redacted_single_line_and_bounded(self):
         message = "line one\nAuthorization: Bearer credential-sentinel " + "x" * 600
@@ -3088,7 +3104,7 @@ class CodexAdapterTests(unittest.TestCase):
             with self.subTest(failure=failure["type"], shape=type(failure.get("error"))):
                 raw = self.workspace / "events.jsonl"
                 raw.write_text(self.stream(self.events[:-1] + [failure]))
-                outcome = agent_job.CodexAdapter().parse(raw, 0)
+                outcome = rally_core.CodexAdapter().parse(raw, 0)
                 assert_public_failure(self, outcome, "provider_error")
                 self.assertLessEqual(len(outcome.error["message"]), 300)
                 self.assertNotIn("\n", outcome.error["message"])
@@ -3149,8 +3165,8 @@ class CodexAdapterTests(unittest.TestCase):
         empty_raw = self.workspace / "empty-stdout.jsonl"
         empty_raw.write_text("")
         stderr_file = self.workspace / "test-stderr.log"
-        req = agent_job.JobRequest(provider="codex", prompt="hello", cwd=self.workspace)
-        adapter = agent_job.CodexAdapter()
+        req = rally_core.JobRequest(provider="codex", prompt="hello", cwd=self.workspace)
+        adapter = rally_core.CodexAdapter()
 
         stderr_file.write_text("Error: Rate limit exceeded; token=credential-sentinel\n")
         outcome = adapter.parse(req, empty_raw, stderr_file, 1)
@@ -3176,7 +3192,7 @@ class ClaudeAdapterTests(unittest.TestCase):
         self.bin = self.workspace / "bin"
         self.bin.mkdir()
         self.args_file = self.workspace / "arguments.json"
-        fixtures = Path(__file__).parent / "fixtures" / "agent_job"
+        fixtures = Path(__file__).parent / "fixtures" / "rally"
         self.raw = (fixtures / "claude-2.1.311-synthetic-success.jsonl").read_text()
         self.events = [json.loads(line) for line in self.raw.splitlines()]
         self.init, self.assistant, self.terminal = self.events
@@ -3217,7 +3233,7 @@ class ClaudeAdapterTests(unittest.TestCase):
         return "\n".join(json.dumps(event) for event in events)
 
     def parse(self, events, exit_code=0):
-        adapter = agent_job.provider_adapters().get("claude")
+        adapter = rally_core.provider_adapters().get("claude")
         self.assertIsNotNone(adapter, "Claude adapter must be registered")
         path = self.workspace / "parse.jsonl"
         path.write_text(self.stream(events))
@@ -3265,10 +3281,10 @@ class ClaudeAdapterTests(unittest.TestCase):
                 completed = self.run_job(*flags)
                 self.assertEqual(completed.returncode, 2, completed.stderr)
                 self.assertFalse(self.root.exists())
-        adapter = agent_job.provider_adapters().get("claude")
+        adapter = rally_core.provider_adapters().get("claude")
         self.assertIsNotNone(adapter)
         with self.assertRaisesRegex(ValueError, "unsupported Claude provider options"):
-            adapter.validate(agent_job.JobRequest(provider="claude", prompt="p", cwd=self.workspace,
+            adapter.validate(rally_core.JobRequest(provider="claude", prompt="p", cwd=self.workspace,
                                                   provider_options={"unknown": True}))
 
     def test_terminal_result_wins_over_init_assistant_tools_and_unrelated_diagnostics(self):
@@ -3561,7 +3577,7 @@ class ClaudeAdapterTests(unittest.TestCase):
                 with self.subTest(kind=kind, exit_code=exit_code):
                     raw = self.workspace / "diagnostic.jsonl"
                     raw.write_text(text + "\n" + self.stream(self.events[:2]) + "\n")
-                    outcome = agent_job.ClaudeAdapter().parse(raw, exit_code)
+                    outcome = rally_core.ClaudeAdapter().parse(raw, exit_code)
                     assert_public_failure(self, outcome, kind)
                     self.assertEqual(outcome.error["message"], f"claude {public} unavailable")
 
@@ -3570,7 +3586,7 @@ class ClaudeAdapterTests(unittest.TestCase):
         for content in (self.raw.encode()[:-40] + "é".encode()[:1], b"[" * 5000 + b"\n" + self.raw.encode()[:300]):
             with self.subTest(content=content[-20:]):
                 raw.write_bytes(content)
-                assert_public_failure(self, agent_job.ClaudeAdapter().parse(raw, 0), "parse_error")
+                assert_public_failure(self, rally_core.ClaudeAdapter().parse(raw, 0), "parse_error")
 
     def test_error_messages_are_redacted_single_line_and_bounded(self):
         message = "line one\nAuthorization: Bearer credential-sentinel " + "x" * 600
@@ -3580,7 +3596,7 @@ class ClaudeAdapterTests(unittest.TestCase):
             with self.subTest(terminal=type(terminal.get("error") or terminal.get("errors"))):
                 raw = self.workspace / "events.jsonl"
                 raw.write_text(self.stream(self.events[:-1] + [terminal]))
-                outcome = agent_job.ClaudeAdapter().parse(raw, 0)
+                outcome = rally_core.ClaudeAdapter().parse(raw, 0)
                 self.assertFalse(outcome.success)
                 self.assertIn(outcome.error["type"], ("provider_error", "auth_error"))
                 self.assertNotIn(CREDENTIAL_SENTINEL, json.dumps({
@@ -3643,8 +3659,8 @@ class ClaudeAdapterTests(unittest.TestCase):
         empty_raw = self.workspace / "empty-stdout.jsonl"
         empty_raw.write_text("")
         stderr_file = self.workspace / "test-stderr.log"
-        req = agent_job.JobRequest(provider="claude", prompt="hello", cwd=self.workspace)
-        adapter = agent_job.ClaudeAdapter()
+        req = rally_core.JobRequest(provider="claude", prompt="hello", cwd=self.workspace)
+        adapter = rally_core.ClaudeAdapter()
 
         stderr_file.write_text("Error: rate limit reached; Bearer credential-sentinel\n")
         outcome = adapter.parse(req, empty_raw, stderr_file, 1)
@@ -3670,8 +3686,8 @@ class AgentJobFinalReviewTests(unittest.TestCase):
         self.bin = self.workspace / "bin"
         self.bin.mkdir()
         self.release = self.workspace / "release"
-        self.store = agent_job.JobStore(self.workspace / "jobs")
-        self.manager = agent_job.JobManager(self.store)
+        self.store = rally_core.JobStore(self.workspace / "jobs")
+        self.manager = rally_core.JobManager(self.store)
         self.environment = mock.patch.dict(os.environ, {
             "PATH": str(self.bin) + os.pathsep + os.environ.get("PATH", ""),
             "AGENT_JOB_DIR": str(self.store.root), "AGENT_JOB_LAUNCHER": "detached",
@@ -3719,7 +3735,7 @@ class AgentJobFinalReviewTests(unittest.TestCase):
     def start(self, provider):
         # Keep failed subtests from leaving more than one delayed job active.
         self.stop_remaining()
-        return self.manager.start(agent_job.JobRequest(provider=provider, prompt="task", cwd=self.workspace))["job_id"]
+        return self.manager.start(rally_core.JobRequest(provider=provider, prompt="task", cwd=self.workspace))["job_id"]
 
     def eventually(self, condition):
         deadline = time.monotonic() + 5
@@ -3731,7 +3747,7 @@ class AgentJobFinalReviewTests(unittest.TestCase):
         self.fail("condition did not become true")
 
     def test_active_session_is_durable_and_stop_allows_followup(self):
-        for provider in agent_job.PROVIDERS:
+        for provider in rally_core.PROVIDERS:
             with self.subTest(provider=provider):
                 self.release.unlink(missing_ok=True)
                 early, terminal = self.events(provider)
@@ -3797,7 +3813,7 @@ class AgentJobFinalReviewTests(unittest.TestCase):
                 raw = self.workspace / "pretty-nested.jsonl"
                 raw.write_text('{\n  "status": "RUNNING",\n  "conversation_id": "real",\n'
                                '  "metadata":\n  ' + json.dumps(nested) + '\n}')
-                scanner = agent_job._IncrementalSessionScanner(raw, "agy")
+                scanner = rally_core._IncrementalSessionScanner(raw, "agy")
                 self.assertEqual(scanner.scan(), "real")
 
     def test_running_agy_persists_outer_not_nested_conversation(self):
@@ -3833,7 +3849,7 @@ class AgentJobFinalReviewTests(unittest.TestCase):
         self.assertEqual(self.manager.wait(job_id, timeout=5)["status"], "SUCCESS")
 
     def test_worker_death_reconciliation_retains_emitted_session(self):
-        for provider in agent_job.PROVIDERS:
+        for provider in rally_core.PROVIDERS:
             with self.subTest(provider=provider):
                 early, terminal = self.events(provider)
                 self.install(provider, self.stream(early) + '{"partial":', self.stream(terminal), delayed=True)
@@ -3850,7 +3866,7 @@ class AgentJobFinalReviewTests(unittest.TestCase):
                 self.assertEqual(result["session_id"], "review-session")
 
     def test_parse_failure_preserves_earlier_session(self):
-        for provider in agent_job.PROVIDERS:
+        for provider in rally_core.PROVIDERS:
             with self.subTest(provider=provider):
                 early, terminal = self.events(provider)
                 invalid = {**terminal[-1], "usage": []}
@@ -3862,7 +3878,7 @@ class AgentJobFinalReviewTests(unittest.TestCase):
     def test_terminal_metadata_and_errors_allow_only_public_fields(self):
         private = {"authorization": "private-auth", "headers": {"token": "private-header"},
                    "token": "private-token", "secret": "private-secret", "unknown": "private-unknown"}
-        for provider in agent_job.PROVIDERS:
+        for provider in rally_core.PROVIDERS:
             with self.subTest(provider=provider):
                 early, events = self.events(provider)
                 terminal = {**events[-1], **private}
@@ -3943,7 +3959,7 @@ class AgentJobFinalReviewTests(unittest.TestCase):
 
     def test_partial_extraction_ignores_invalid_ids_and_incomplete_tail(self):
         raw = self.workspace / "partial.jsonl"
-        for provider in agent_job.PROVIDERS:
+        for provider in rally_core.PROVIDERS:
             with self.subTest(provider=provider):
                 early, terminal = self.events(provider)
                 invalid = {"agy": {"conversation_id": ["invalid"]},
@@ -3977,7 +3993,7 @@ class AgentJobFinalReviewTests(unittest.TestCase):
                   "claude": ("output_tokens_details", "thinking_tokens")}
         bad = ["private-token", ["private-token"], {"secret": "private-token"},
                float("nan"), float("inf"), True, -1]
-        for provider in agent_job.PROVIDERS:
+        for provider in rally_core.PROVIDERS:
             for value in bad:
                 with self.subTest(provider=provider, value=repr(value)):
                     early, events = self.events(provider)
@@ -4008,14 +4024,14 @@ class AgentJobFinalReviewTests(unittest.TestCase):
     def test_public_error_status_accepts_only_http_integer(self):
         for status in ("private-token", "429", True, 99, 600, -1, [429]):
             with self.subTest(status=status):
-                self.assertNotIn("status", agent_job._public_error({"status": status}))
-        self.assertEqual(agent_job._public_error({"status": 429}), {"status": 429})
+                self.assertNotIn("status", rally_core._public_error({"status": status}))
+        self.assertEqual(rally_core._public_error({"status": 429}), {"status": 429})
 
     def test_metric_numbers_bound_oversized_integers(self):
-        self.assertEqual(agent_job._public_usage({"tokens": 10 ** 400}, "agy"), {})
+        self.assertEqual(rally_core._public_usage({"tokens": 10 ** 400}, "agy"), {})
 
     def test_terminal_state_not_visible_until_result_is_committed(self):
-        original_write = agent_job.atomic_write
+        original_write = rally_core.atomic_write
         entered = threading.Event()
         release = threading.Event()
         failures = []
@@ -4028,7 +4044,7 @@ class AgentJobFinalReviewTests(unittest.TestCase):
                     failures.append("publication barrier timed out")
             return result
 
-        with mock.patch.object(agent_job.JobManager, "_launch", return_value=None), mock.patch.object(agent_job, "atomic_write", side_effect=write):
+        with mock.patch.object(rally_core.JobManager, "_launch", return_value=None), mock.patch.object(rally_core, "atomic_write", side_effect=write):
             output = io.StringIO()
             def finish_started_job(job):
                 try:
@@ -4037,10 +4053,10 @@ class AgentJobFinalReviewTests(unittest.TestCase):
                 except Exception as error:
                     failures.append(str(error))
 
-            with mock.patch.object(agent_job.JobManager, "_launch", side_effect=lambda job, token: threading.Thread(
+            with mock.patch.object(rally_core.JobManager, "_launch", side_effect=lambda job, token: threading.Thread(
                     target=finish_started_job, args=(job,), daemon=True).start()), contextlib.redirect_stdout(output):
                 try:
-                    code = agent_job.main(["codex", "start", "--cwd", str(self.workspace), "--prompt", "task"])
+                    code = rally_core.main(["codex", "start", "--cwd", str(self.workspace), "--prompt", "task"])
                     self.assertTrue(entered.wait(5))
                     descriptor = json.loads(output.getvalue())
                     self.assertEqual((descriptor["status"], code), ("STARTING", 0))
@@ -4052,14 +4068,14 @@ class AgentJobFinalReviewTests(unittest.TestCase):
             self.assertEqual(self.manager._summary(job)["status"], "ERROR")
             after = io.StringIO()
             with contextlib.redirect_stdout(after):
-                committed_code = agent_job.main(["status", descriptor["job_id"]])
+                committed_code = rally_core.main(["status", descriptor["job_id"]])
             self.assertEqual((json.loads(after.getvalue())["status"], committed_code), ("ERROR", 1))
             self.assertEqual(failures, [])
 
     def test_incremental_scan_reads_only_new_bytes_and_stops_after_session(self):
         raw = self.workspace / "growing.jsonl"
         raw.write_bytes(b"")
-        scanner = agent_job._IncrementalSessionScanner(raw, "codex")
+        scanner = rally_core._IncrementalSessionScanner(raw, "codex")
         original_open = Path.open
         counts = []
 
@@ -4097,7 +4113,7 @@ class AgentJobFinalReviewTests(unittest.TestCase):
 
     def test_incremental_scan_frames_split_utf8_and_escaped_strings_without_newline(self):
         raw = self.workspace / "split.jsonl"
-        scanner = agent_job._IncrementalSessionScanner(raw, "codex")
+        scanner = rally_core._IncrementalSessionScanner(raw, "codex")
         event = json.dumps({"type": "thread.started", "message": 'brace } and escaped " quote',
                             "thread_id": "sess-é"}, ensure_ascii=False).encode()
         split = event.index("é".encode()) + 1
@@ -4110,7 +4126,7 @@ class AgentJobFinalReviewTests(unittest.TestCase):
     def test_incremental_scan_bounds_large_incomplete_frame_and_reads_appends_once(self):
         raw = self.workspace / "incomplete.jsonl"
         raw.write_bytes(b'{"type":"noise","data":"')
-        scanner = agent_job._IncrementalSessionScanner(raw, "codex")
+        scanner = rally_core._IncrementalSessionScanner(raw, "codex")
         original_open = Path.open
         bytes_read = []
 
@@ -4133,7 +4149,7 @@ class AgentJobFinalReviewTests(unittest.TestCase):
             stream = original_open(path, *args, **kwargs)
             return TrackedStream(stream) if path == raw and args == ("rb",) else stream
 
-        with mock.patch.object(Path, "open", opened), mock.patch.object(agent_job.json, "loads", wraps=json.loads) as decode:
+        with mock.patch.object(Path, "open", opened), mock.patch.object(rally_core.json, "loads", wraps=json.loads) as decode:
             for _ in range(12):
                 with raw.open("ab") as stream:
                     stream.write(b"x" * 100000)
@@ -4146,10 +4162,10 @@ class AgentJobFinalReviewTests(unittest.TestCase):
             self.assertEqual(scanner.scan(), "after-large")
 
     def test_session_scan_runs_outside_job_lock_and_stops_after_persistence(self):
-        job = self.store.create(agent_job.JobRequest(provider="codex", prompt="task", cwd=self.workspace))
+        job = self.store.create(rally_core.JobRequest(provider="codex", prompt="task", cwd=self.workspace))
         raw = job.directory / "stdout.jsonl"
         raw.write_text('{"type":"thread.started","thread_id":"early-session"}\n')
-        scanner = agent_job._IncrementalSessionScanner(raw, "codex")
+        scanner = rally_core._IncrementalSessionScanner(raw, "codex")
         entered, release, acquired = threading.Event(), threading.Event(), threading.Event()
         original_scan = scanner.scan
         failures = []
@@ -4172,7 +4188,7 @@ class AgentJobFinalReviewTests(unittest.TestCase):
             try:
                 self.assertTrue(entered.wait(5))
                 def take_lock():
-                    with agent_job._job_lock(job):
+                    with rally_core._job_lock(job):
                         acquired.set()
                 contender = threading.Thread(target=take_lock, daemon=True)
                 contender.start()
@@ -4194,40 +4210,40 @@ class AgentJobFinalReviewTests(unittest.TestCase):
         self.assertNotIn("_CompatibilityModule", source)
         self.assertNotIn("_OWNER_MAP", source)
         self.assertNotIn("_SUBMODULE_NAMES", source)
-        self.assertIn("from agent_job.cli import main", source)
+        self.assertIn("from rally_core.cli import main", source)
         self.assertIn("raise SystemExit(main())", source)
         self.assertLessEqual(len(lines), 10)
 
     def test_copied_executable_and_package_runs_help_and_doctor_from_unrelated_cwd(self):
         temp_dir = self.workspace / "portable_runner"
         temp_dir.mkdir()
-        runner_copy = temp_dir / "agent-job"
+        runner_copy = temp_dir / "rally"
         shutil.copy2(RUNNER, runner_copy)
         runner_copy.chmod(0o755)
-        pkg_copy = temp_dir / "agent_job"
-        shutil.copytree(RUNNER.parent / "agent_job", pkg_copy)
+        pkg_copy = temp_dir / "rally_core"
+        shutil.copytree(RUNNER.parent / "rally_core", pkg_copy)
 
         unrelated_cwd = self.workspace / "unrelated_caller"
         unrelated_cwd.mkdir()
 
         help_res = subprocess.run([str(runner_copy), "--help"], cwd=unrelated_cwd, capture_output=True, text=True)
         self.assertEqual(help_res.returncode, 0)
-        self.assertIn("agent-job PROVIDER", help_res.stdout)
+        self.assertIn("rally PROVIDER", help_res.stdout)
 
         doctor_res = subprocess.run([str(runner_copy), "doctor"], cwd=unrelated_cwd, capture_output=True, text=True)
         self.assertEqual(doctor_res.returncode, 0)
         doctor_data = json.loads(doctor_res.stdout)
-        self.assertEqual(doctor_data["schema_version"], agent_job.SCHEMA_VERSION)
+        self.assertEqual(doctor_data["schema_version"], rally_core.SCHEMA_VERSION)
         self.assertEqual(len(doctor_data["providers"]), 4)
 
     def test_copied_executable_runs_jobs_and_spawns_subprocesses_finding_sibling_package(self):
         temp_dir = self.workspace / "portable_runner_job"
         temp_dir.mkdir()
-        runner_copy = temp_dir / "agent-job"
+        runner_copy = temp_dir / "rally"
         shutil.copy2(RUNNER, runner_copy)
         runner_copy.chmod(0o755)
-        pkg_copy = temp_dir / "agent_job"
-        shutil.copytree(RUNNER.parent / "agent_job", pkg_copy)
+        pkg_copy = temp_dir / "rally_core"
+        shutil.copytree(RUNNER.parent / "rally_core", pkg_copy)
 
         early, terminal = self.events("agy")
         self.install("agy", "diagnostic\n" + self.stream(early), "\n" + self.stream(terminal))
@@ -4254,7 +4270,7 @@ class AgentJobBoundsTests(unittest.TestCase):
         self.workspace = Path(self.temp.name).resolve()
 
     def test_truncate_response_at_valid_utf8_boundary_with_indicator(self):
-        from agent_job.model import truncate_response, MAX_PUBLIC_RESPONSE_BYTES, TRUNCATION_MARKER
+        from rally_core.model import truncate_response, MAX_PUBLIC_RESPONSE_BYTES, TRUNCATION_MARKER
         self.assertEqual(truncate_response("short text"), "short text")
 
         oversized_ascii = "a" * (MAX_PUBLIC_RESPONSE_BYTES + 500)
@@ -4270,7 +4286,7 @@ class AgentJobBoundsTests(unittest.TestCase):
         truncated_mb.encode("utf-8").decode("utf-8")
 
     def test_provider_outcome_and_finalization_enforce_response_bounds(self):
-        from agent_job.model import ProviderOutcome, MAX_PUBLIC_RESPONSE_BYTES, TRUNCATION_MARKER
+        from rally_core.model import ProviderOutcome, MAX_PUBLIC_RESPONSE_BYTES, TRUNCATION_MARKER
         oversized = "x" * (MAX_PUBLIC_RESPONSE_BYTES + 1000)
         outcome = ProviderOutcome(True, oversized, "sess-1", {}, None, "model-1", {})
         self.assertLessEqual(len(outcome.response.encode("utf-8")), MAX_PUBLIC_RESPONSE_BYTES)
@@ -4282,15 +4298,15 @@ class AgentJobBoundsTests(unittest.TestCase):
         terminal = json.dumps({"status": "SUCCESS", "response": "final agy answer", "conversation_id": "agy-large-sess", "usage": {"tokens": 100}})
         raw_file.write_text(padding + terminal + "\n")
 
-        adapter = agent_job.AgyAdapter()
-        req = agent_job.JobRequest(provider="agy", prompt="hi", cwd=self.workspace)
+        adapter = rally_core.AgyAdapter()
+        req = rally_core.JobRequest(provider="agy", prompt="hi", cwd=self.workspace)
         outcome = adapter.parse(req, raw_file, self.workspace / "stderr.log", 0)
         self.assertTrue(outcome.success)
         self.assertEqual(outcome.response, "final agy answer")
         self.assertEqual(outcome.session_id, "agy-large-sess")
 
     def test_jsonl_events_bounds_oversized_line_and_recovers_next_event(self):
-        from agent_job.providers.base import _jsonl_events
+        from rally_core.providers.base import _jsonl_events
         raw_file = self.workspace / "oversized.jsonl"
         with raw_file.open("wb") as stream:
             stream.write(b"x" * 2_000_000 + b"\n")
@@ -4301,8 +4317,8 @@ class AgentJobBoundsTests(unittest.TestCase):
         self.assertEqual(events[0], {"type": "valid", "ok": True})
 
     def test_lifecycle_finalization_and_read_bound_public_response(self):
-        from agent_job.model import MAX_PUBLIC_RESPONSE_BYTES, TRUNCATION_MARKER
-        store = agent_job.JobStore(self.workspace / "jobs")
+        from rally_core.model import MAX_PUBLIC_RESPONSE_BYTES, TRUNCATION_MARKER
+        store = rally_core.JobStore(self.workspace / "jobs")
         fixture = self.workspace / "fixture.py"
         fixture.write_text(
             "import json, os, sys\n"
@@ -4312,8 +4328,8 @@ class AgentJobBoundsTests(unittest.TestCase):
         fixture.chmod(0o700)
         with mock.patch.dict(os.environ, {"AGENT_JOB_TEST_FIXTURE_EXECUTABLE": str(fixture),
                                           "AGENT_JOB_LAUNCHER": "detached"}):
-            manager = agent_job.JobManager(store, adapters={"_fixture": FixtureAdapter()})
-            desc = manager.start(agent_job.JobRequest(provider="_fixture", prompt="bound check", cwd=self.workspace))
+            manager = rally_core.JobManager(store, adapters={"_fixture": FixtureAdapter()})
+            desc = manager.start(rally_core.JobRequest(provider="_fixture", prompt="bound check", cwd=self.workspace))
             result = manager.wait(desc["job_id"])
             self.assertEqual(result["status"], "SUCCESS")
             self.assertLessEqual(len(result["response"].encode("utf-8")), MAX_PUBLIC_RESPONSE_BYTES)
@@ -4329,7 +4345,7 @@ class AgentJobBoundsTests(unittest.TestCase):
             self.assertLessEqual(len(response_file.read_bytes()), MAX_PUBLIC_RESPONSE_BYTES)
 
     def test_provider_result_response_fields_and_serialized_result_are_bounded(self):
-        from agent_job.model import ProviderOutcome, MAX_PUBLIC_RESPONSE_BYTES, TRUNCATION_MARKER
+        from rally_core.model import ProviderOutcome, MAX_PUBLIC_RESPONSE_BYTES, TRUNCATION_MARKER
         oversized = "y" * (MAX_PUBLIC_RESPONSE_BYTES + 5000)
         outcome = ProviderOutcome(True, oversized, "sess-1", {"tokens": 10}, None, "model-1",
                                   {"response": oversized, "result": oversized, "status": "SUCCESS", "keep_me": "val"})
@@ -4341,39 +4357,39 @@ class AgentJobBoundsTests(unittest.TestCase):
         self.assertEqual(outcome.provider_result["keep_me"], "val")
 
     def test_provider_adapters_sanitize_nested_response_metadata_while_preserving_non_response_fields(self):
-        from agent_job.model import MAX_PUBLIC_RESPONSE_BYTES, TRUNCATION_MARKER
+        from rally_core.model import MAX_PUBLIC_RESPONSE_BYTES, TRUNCATION_MARKER
         oversized = "z" * (MAX_PUBLIC_RESPONSE_BYTES + 2000)
         # AGY adapter
         agy_raw = self.workspace / "agy-oversized.json"
         agy_raw.write_text(json.dumps({"status": "SUCCESS", "response": oversized, "conversation_id": "sess-agy",
                                       "usage": {"tokens": 5}, "model": "agy-model"}))
-        outcome_agy = agent_job.AgyAdapter().parse(agy_raw, 0)
+        outcome_agy = rally_core.AgyAdapter().parse(agy_raw, 0)
         self.assertLessEqual(len(outcome_agy.provider_result["response"].encode("utf-8")), MAX_PUBLIC_RESPONSE_BYTES)
         self.assertTrue(outcome_agy.provider_result["response"].endswith(TRUNCATION_MARKER))
         self.assertEqual(outcome_agy.provider_result["conversation_id"], "sess-agy")
         self.assertEqual(outcome_agy.provider_result["status"], "SUCCESS")
 
         # Claude terminal sanitization in _public_terminal
-        from agent_job.providers.base import _public_terminal
+        from rally_core.providers.base import _public_terminal
         terminal_claude = _public_terminal({"type": "result", "subtype": "success", "is_error": False,
                                             "result": oversized, "session_id": "sess-claude",
                                             "total_cost_usd": 0.05, "duration_ms": 1200},
-                                           agent_job.ClaudeAdapter.terminal_fields, "claude")
+                                           rally_core.ClaudeAdapter.terminal_fields, "claude")
         self.assertLessEqual(len(terminal_claude["result"].encode("utf-8")), MAX_PUBLIC_RESPONSE_BYTES)
         self.assertTrue(terminal_claude["result"].endswith(TRUNCATION_MARKER))
         self.assertEqual(terminal_claude["total_cost_usd"], 0.05)
         self.assertEqual(terminal_claude["duration_ms"], 1200)
 
     def test_lifecycle_finalization_bounds_nested_provider_result_and_serialized_public_result(self):
-        from agent_job.model import MAX_PUBLIC_RESPONSE_BYTES, TRUNCATION_MARKER
-        store = agent_job.JobStore(self.workspace / "jobs")
+        from rally_core.model import MAX_PUBLIC_RESPONSE_BYTES, TRUNCATION_MARKER
+        store = rally_core.JobStore(self.workspace / "jobs")
         oversized = "w" * (MAX_PUBLIC_RESPONSE_BYTES + 50_000)
-        job = store.create(agent_job.JobRequest(provider="agy", prompt="test", cwd=self.workspace))
-        outcome = agent_job.ProviderOutcome(
+        job = store.create(rally_core.JobRequest(provider="agy", prompt="test", cwd=self.workspace))
+        outcome = rally_core.ProviderOutcome(
             True, oversized, "sess-1", {"tokens": 42}, None, "mod-1",
             {"response": oversized, "result": oversized, "tokens": 42, "status": "SUCCESS"}
         )
-        manager = agent_job.JobManager(store, adapters={"_fixture": FixtureAdapter()})
+        manager = rally_core.JobManager(store, adapters={"_fixture": FixtureAdapter()})
         res = manager.finalize(job.job_id, status="SUCCESS", exit_code=0, outcome=outcome)
         self.assertLessEqual(len(res["provider_result"]["response"].encode("utf-8")), MAX_PUBLIC_RESPONSE_BYTES)
         self.assertTrue(res["provider_result"]["response"].endswith(TRUNCATION_MARKER))
@@ -4399,7 +4415,7 @@ class AgentJobBoundsTests(unittest.TestCase):
         with mock.patch.object(Path, "read_text", guarded_read_text):
             for provider in ("agy", "copilot", "claude", "codex"):
                 with self.subTest(provider=provider):
-                    session = agent_job._partial_session(raw_file, provider)
+                    session = rally_core._partial_session(raw_file, provider)
                     self.assertIsNone(session)
 
     def test_provider_adapters_no_result_on_oversized_transcript_remain_bounded(self):
@@ -4416,12 +4432,12 @@ class AgentJobBoundsTests(unittest.TestCase):
             return original_read_text(path_self, *args, **kwargs)
 
         with mock.patch.object(Path, "read_text", guarded_read_text):
-            outcome_agy = agent_job.AgyAdapter().parse(raw_file, 7)
+            outcome_agy = rally_core.AgyAdapter().parse(raw_file, 7)
             self.assertFalse(outcome_agy.success)
             self.assertIsNone(outcome_agy.session_id)
             self.assertEqual(outcome_agy.error["type"], "provider_exit")
 
-            outcome_copilot = agent_job.CopilotAdapter().parse(raw_file, 7)
+            outcome_copilot = rally_core.CopilotAdapter().parse(raw_file, 7)
             self.assertFalse(outcome_copilot.success)
             self.assertIsNone(outcome_copilot.session_id)
             self.assertEqual(outcome_copilot.error["type"], "provider_exit")
@@ -4432,13 +4448,13 @@ class AgentJobBoundsTests(unittest.TestCase):
         noise = (json.dumps({"type": "log", "data": "z" * 500}) + "\n") * 6000
         head_file.write_text(head_event + noise)
         self.assertGreater(head_file.stat().st_size, 3_000_000)
-        self.assertEqual(agent_job._partial_session(head_file, "codex"), "head-session-id")
+        self.assertEqual(rally_core._partial_session(head_file, "codex"), "head-session-id")
 
         tail_file = self.workspace / "oversized-tail-session.jsonl"
         tail_event = json.dumps({"type": "result", "session_id": "tail-session-id"}) + "\n"
         tail_file.write_text(noise + tail_event)
         self.assertGreater(tail_file.stat().st_size, 3_000_000)
-        self.assertEqual(agent_job._partial_session(tail_file, "claude"), "tail-session-id")
+        self.assertEqual(rally_core._partial_session(tail_file, "claude"), "tail-session-id")
 
 
 if __name__ == "__main__":

@@ -166,7 +166,7 @@ def doctor_provider(provider: str) -> dict[str, object]:
 
 def _doctor_main(arguments: list[str]) -> int:
     parser = argparse.ArgumentParser(
-        prog="agent-job doctor", formatter_class=argparse.RawDescriptionHelpFormatter,
+        prog="rally doctor", formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Report local provider readiness as JSON: READY, MISSING, or UNAVAILABLE.",
         epilog="""READY checks executable/version and local auth status for Codex/Claude only.
 AGY/Copilot auth is NOT_CHECKED. Probes have a 3-second/4096-byte limit each.
@@ -190,7 +190,7 @@ Exit 0 means the report was produced; inspect each provider's status.
 
 
 def _management_main(arguments: list[str], *, legacy_output: bool = False) -> int:
-    parser = argparse.ArgumentParser(prog="agent-job", description="Manage durable agent jobs. " + PERMISSION_POLICY,
+    parser = argparse.ArgumentParser(prog="rally", description="Manage durable agent jobs. " + PERMISSION_POLICY,
                                      epilog=HELP_TEXT, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest="command", required=True)
     for name in ("status", "wait", "read", "stop"):
@@ -256,7 +256,7 @@ def main(argv: list[str] | None = None) -> int:
             return entry(Path(arguments[1]), arguments[2], arguments[3])
         except (OSError, ValueError):
             return 2
-    parser = argparse.ArgumentParser(prog="agent-job", description="Portable agent job runner. " + PERMISSION_POLICY,
+    parser = argparse.ArgumentParser(prog="rally", description="Portable agent job runner. " + PERMISSION_POLICY,
                                      epilog=HELP_TEXT, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("provider", choices=PROVIDERS)
     parser.add_argument("action", nargs="?", choices=("run", "start"), default="run")

@@ -15,7 +15,7 @@ EFFORT_LEVELS = frozenset({"none", "minimal", "low", "medium", "high", "xhigh", 
 PERMISSION_POLICY = "Providers run autonomously with permission/sandbox bypass flags."
 JOB_ID_PATTERN = re.compile(r"[0-9]{8}T[0-9]{6}Z-[0-9a-f]{12}")
 TERMINAL_STATES = frozenset({"SUCCESS", "ERROR", "STOPPED"})
-RUNNER_PATH = (Path(__file__).resolve().parents[1] / "agent-job").resolve()
+RUNNER_PATH = (Path(__file__).resolve().parents[1] / "rally").resolve()
 SUMMARY_FIELDS = ("schema_version", "job_id", "provider", "status", "cwd", "model", "effort", "session_id", "created_at", "source_job_id", "transcript_dir")
 PROVIDERS = ("agy", "copilot", "codex", "claude")
 DOCTOR_TIMEOUT_SECONDS = 3.0
@@ -40,14 +40,14 @@ def truncate_response(text: str, limit: int = MAX_PUBLIC_RESPONSE_BYTES) -> str:
             clipped = clipped[:-1]
     return TRUNCATION_MARKER
 HELP_TEXT = """Lifecycle:
-  agent-job PROVIDER [run|start] (--prompt TEXT | --prompt-file FILE) [options]
-  agent-job followup JOB_ID (--prompt TEXT | --prompt-file FILE)
-  agent-job status JOB_ID
-  agent-job wait JOB_ID [--timeout SECONDS]
-  agent-job read JOB_ID
-  agent-job stop JOB_ID
-  agent-job list [--cwd DIR]
-  agent-job doctor [PROVIDER ...]
+  rally PROVIDER [run|start] (--prompt TEXT | --prompt-file FILE) [options]
+  rally followup JOB_ID (--prompt TEXT | --prompt-file FILE)
+  rally status JOB_ID
+  rally wait JOB_ID [--timeout SECONDS]
+  rally read JOB_ID
+  rally stop JOB_ID
+  rally list [--cwd DIR]
+  rally doctor [PROVIDER ...]
 
 Permission policy:
   All providers run autonomously with permission/sandbox bypass flags. These
@@ -74,12 +74,12 @@ Storage and result schema:
   provider_result. Provider semantic failures override zero process exits.
 
 Providers and examples (one caller-owned RTK boundary):
-  rtk tools/agent-job agy run --model flash --effort high --prompt 'Review changes.'
-  rtk tools/agent-job copilot start --model auto --max-credits 30 --prompt-file task.txt
-  rtk tools/agent-job codex start --effort low --cwd /absolute/project --prompt 'Review.'
-  rtk tools/agent-job claude run --model haiku --effort low --prompt 'Review changes.'
-  rtk tools/agent-job wait JOB_ID
-  rtk tools/agent-job followup JOB_ID --prompt 'Check another case.'
+  rtk rally agy run --model flash --effort high --prompt 'Review changes.'
+  rtk rally copilot start --model auto --max-credits 30 --prompt-file task.txt
+  rtk rally codex start --effort low --cwd /absolute/project --prompt 'Review.'
+  rtk rally claude run --model haiku --effort low --prompt 'Review changes.'
+  rtk rally wait JOB_ID
+  rtk rally followup JOB_ID --prompt 'Check another case.'
   AGY defaults: sonnet alias and high effort; flash alias also supported.
   AGY selectors: --project ID and --conversation ID may coexist; --new-project
   conflicts with either. --session resumes a provider conversation/thread.
@@ -90,7 +90,7 @@ Providers and examples (one caller-owned RTK boundary):
 
 Environment and portability:
   Python 3.9+, standard library only; no .venv, NOMIRU imports, or global install.
-  Use /absolute/path/to/tools/agent-job from any repository with --cwd DIR.
+  Use /absolute/path/to/rally from any repository with --cwd DIR.
   AGENT_JOB_DIR overrides transcript root (relative to caller cwd).
   AGENT_JOB_LAUNCHER=auto|launchctl|detached; auto uses launchctl on macOS and
   detached sessions elsewhere. AGENT_JOB_LAUNCHCTL overrides launchctl executable.
