@@ -46,6 +46,35 @@ class RallyIdentityTests(unittest.TestCase):
         self.assertEqual(primary.stdout, compat.stdout)
 
 
+class RallyRepositoryTests(unittest.TestCase):
+    def test_repository_has_no_nomiru_runtime_dependency(self):
+        forbidden = ("tools/" + "agent_job", "agy_" + "nomiru.sh", "NOMIRU" + "_AGY_")
+        text = "\n".join(
+            path.read_text(errors="replace")
+            for path in ROOT.rglob("*")
+            if path.is_file() and ".git" not in path.parts
+        )
+        for marker in forbidden:
+            self.assertNotIn(marker, text)
+
+    def test_project_metadata_exposes_rally_script(self):
+        metadata = (ROOT / "pyproject.toml").read_text()
+        self.assertIn('rally = "rally_core.cli:main"', metadata)
+
+    def test_project_metadata_packaging_and_license_boundaries(self):
+        pyproject_path = ROOT / "pyproject.toml"
+        self.assertTrue(pyproject_path.is_file())
+        metadata = pyproject_path.read_text()
+        self.assertIn('requires-python = ">=3.9"', metadata)
+        self.assertIn("dependencies = []", metadata)
+        self.assertNotIn("license", metadata.lower())
+        self.assertIn('packages = ["rally_core", "rally_core.providers"]', metadata)
+
+    def test_standalone_documentation_exists(self):
+        self.assertTrue((ROOT / "README.md").is_file())
+        self.assertTrue((ROOT / "docs" / "architecture.md").is_file())
+
+
 def parse_provider_fixture(case, provider, name, exit_code=0):
     """Replay a bounded fixture through the registered adapter's parser."""
     path = Path(case.workspace) / "fixture-parse.jsonl"
@@ -650,7 +679,7 @@ class AgentJobDoctorTests(unittest.TestCase):
                        "read", "stop", "list", "followup", "doctor", "bypass", "broader machine access",
                        "completed", "resumable session", ".artifacts/agent-jobs", "AGENT_JOB_DIR",
                        "AGENT_JOB_LAUNCHER", "AGENT_JOB_LAUNCHCTL", "schema_version", "provider_result",
-                       "start once", "wait once", "agy_nomiru.sh", "--max-credits", "--prompt-file"):
+                       "start once", "wait once", "agent-job", "--max-credits", "--prompt-file"):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, output)
 

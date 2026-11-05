@@ -89,15 +89,13 @@ Providers and examples (one caller-owned RTK boundary):
   Codex/Claude omitted model/effort use provider defaults.
 
 Environment and portability:
-  Python 3.9+, standard library only; no .venv, NOMIRU imports, or global install.
+  Python 3.9+, standard library only; no .venv, external dependencies, or global install.
   Use /absolute/path/to/rally from any repository with --cwd DIR.
   AGENT_JOB_DIR overrides transcript root (relative to caller cwd).
   AGENT_JOB_LAUNCHER=auto|launchctl|detached; auto uses launchctl on macOS and
   detached sessions elsewhere. AGENT_JOB_LAUNCHCTL overrides launchctl executable.
   Provider executables and credentials use normal PATH/provider configuration.
-  Deprecated tools/agy_nomiru.sh preserves positional sonnet|flash, legacy output,
-  NOMIRU_AGY_JOBS_DIR, NOMIRU_AGY_LAUNCHER (nohup maps to detached), and
-  NOMIRU_LAUNCHCTL. Its default storage remains .artifacts/agy/jobs in this repo.
+  Compatibility shim ./agent-job preserves legacy entrypoint compatibility.
 
 Doctor:
   READY means local CLI/version and available local auth checks only. Doctor sends

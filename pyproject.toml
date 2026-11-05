@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rally-agent"
+version = "0.1.0"
+description = "Durable multi-provider agent job runner"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.scripts]
+rally = "rally_core.cli:main"
+
+[tool.setuptools]
+packages = ["rally_core", "rally_core.providers"]
