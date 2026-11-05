@@ -49,14 +49,24 @@ class RallyIdentityTests(unittest.TestCase):
 class RallyRepositoryTests(unittest.TestCase):
     def test_repository_has_no_nomiru_runtime_dependency(self):
         forbidden = ("tools/" + "agent_job", "agy_" + "nomiru.sh", "NOMIRU" + "_AGY_")
-        ignored = {".git", ".artifacts", ".superpowers", ".venv", "__pycache__"}
-        text = "\n".join(
-            path.read_text(errors="replace")
-            for path in ROOT.rglob("*")
-            if path.is_file() and not any(part in ignored for part in path.parts)
+        proc = subprocess.run(
+            ["git", "ls-files", "-z"],
+            cwd=ROOT,
+            capture_output=True,
+            check=True,
         )
-        for marker in forbidden:
-            self.assertNotIn(marker, text)
+        tracked_paths = [
+            ROOT / os.fsdecode(entry)
+            for entry in proc.stdout.split(b"\0")
+            if entry
+        ]
+        self.assertTrue(tracked_paths, "Tracked file set must not be empty")
+        regular_files = [path for path in tracked_paths if path.is_file() and not path.is_symlink()]
+        self.assertTrue(regular_files, "Tracked regular file set must not be empty")
+        for path in regular_files:
+            text = path.read_text(errors="replace")
+            for marker in forbidden:
+                self.assertNotIn(marker, text)
 
     def test_project_metadata_exposes_rally_script(self):
         metadata = (ROOT / "pyproject.toml").read_text()
@@ -1836,6 +1846,8 @@ class AgentJobLifecycleTests(unittest.TestCase):
             res = self.manager.wait(job_id, timeout=0.1)
             elapsed = time.monotonic() - start
             # Wait timeout must remain truthful (near requested budget, not consuming multiple probe timeouts)
+            self.assertEqual(len(probe_calls), 1)
+            self.assertLessEqual(sum(probe_calls), 0.1 + 1e-3)
             self.assertLess(elapsed, 0.4)
             self.assertEqual(res["exit_code"], 124)
             # Must not finalize or create result.json
