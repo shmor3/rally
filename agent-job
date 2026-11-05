@@ -2,10 +2,16 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
 import sys
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
+pythonpath = os.environ.get("PYTHONPATH")
+if not pythonpath:
+    os.environ["PYTHONPATH"] = str(ROOT)
+elif str(ROOT) not in pythonpath.split(os.pathsep):
+    os.environ["PYTHONPATH"] = f"{str(ROOT)}{os.pathsep}{pythonpath}"
 
 from rally_core.cli import main
 

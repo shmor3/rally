@@ -1710,7 +1710,7 @@ class AgentJobLifecycleTests(unittest.TestCase):
         command = run.call_args.args[0]
         identity = json.loads((self.store.get(job_id).directory / "worker.json").read_text())
         self.assertEqual(command[:2], ["launchctl", "submit"])
-        self.assertIn(str(RUNNER), command)
+        self.assertEqual(command[command.index("--") + 1:command.index("--_worker")], [sys.executable, "-m", "rally_core"])
         self.assertIn(identity["token"], command)
         self.assertEqual(command[command.index("--_worker") + 1:][:2], [str(self.store.root), job_id])
 
@@ -2383,6 +2383,118 @@ class AgentJobLifecycleTests(unittest.TestCase):
         )
         for prose in prose_cases:
             self.assertEqual(rally_core.process._public_text(prose), prose)
+
+    def test_detached_command_construction_and_module_bootstrap(self):
+        with mock.patch.dict(os.environ, {"AGENT_JOB_LAUNCHER": "detached"}), \
+             mock.patch("subprocess.Popen") as popen_mock:
+            popen_mock.return_value = mock.MagicMock(pid=99999, wait=mock.MagicMock())
+            job_id = self.manager.start(self.request())["job_id"]
+        job = self.store.get(job_id)
+        identity = json.loads((job.directory / "worker.json").read_text())
+        call_args = popen_mock.call_args
+        command = call_args.args[0]
+        kwargs = call_args.kwargs
+        self.assertEqual(command[:3], [sys.executable, "-m", "rally_core"])
+        self.assertEqual(command[3], "--_worker")
+        self.assertEqual(command[4:], [str(self.store.root), job_id, identity["token"]])
+        self.assertEqual(identity["runner"], "rally_core")
+        self.assertIn("PYTHONPATH", kwargs.get("env", {}))
+        self.assertIn(str(ROOT), kwargs["env"]["PYTHONPATH"])
+
+    def test_main_module_execution_prints_usage(self):
+        proc = subprocess.run([sys.executable, "-m", "rally_core", "--help"],
+                              cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("usage: rally", proc.stdout)
+
+    def test_source_checkout_worker_lifecycle_from_foreign_cwd(self):
+        foreign_cwd = self.workspace / "foreign_project"
+        foreign_cwd.mkdir()
+        req = self.request(cwd=foreign_cwd)
+        summary = self.manager.start(req)
+        job_id = summary["job_id"]
+        result = self.manager.wait(job_id, timeout=10.0)
+        self.assertEqual(result["status"], "SUCCESS")
+        self.assertEqual(result["exit_code"], 0)
+
+    def test_isolated_installed_layout_lifecycle_without_checkout_executables(self):
+        install_root = self.workspace / "installed_env"
+        site_packages = install_root / "lib" / "python" / "site-packages"
+        bin_dir = install_root / "bin"
+        site_packages.mkdir(parents=True)
+        bin_dir.mkdir(parents=True)
+
+        # Copy rally_core into site-packages
+        shutil.copytree(ROOT / "rally_core", site_packages / "rally_core")
+
+        # Crucial check: verify that <package_parent>/rally does NOT exist in the installed layout
+        installed_runner_path = site_packages / "rally"
+        self.assertFalse(installed_runner_path.exists())
+
+        # Create installed entrypoint console script (similar to pip-generated script)
+        script = bin_dir / "rally"
+        script.write_text(
+            f"#!{sys.executable}\n"
+            "import sys\n"
+            "from rally_core.cli import main\n"
+            "if __name__ == '__main__':\n"
+            "    sys.exit(main())\n"
+        )
+        script.chmod(0o755)
+
+        # Work in an isolated project directory
+        proj_dir = self.workspace / "installed_proj"
+        proj_dir.mkdir()
+        fake_bin = self.workspace / "fake_bin"
+        fake_bin.mkdir()
+        fake_agy = fake_bin / "agy"
+        fake_agy.write_text(f"#!{sys.executable}\nimport sys\nprint('{{\"status\":\"SUCCESS\",\"response\":\"INSTALLED_OK\",\"conversation_id\":\"conv-1\",\"usage\":{{}}}}')\n")
+        fake_agy.chmod(0o755)
+
+        # Run with isolated PATH and PYTHONPATH, with checkout completely absent
+        env = {
+            "PATH": f"{bin_dir}:{fake_bin}:{os.environ.get('PATH', '')}",
+            "PYTHONPATH": str(site_packages),
+            "AGENT_JOB_LAUNCHER": "detached",
+        }
+        # Run rally via the installed entrypoint script (both run and start/wait)
+        proc = subprocess.run(
+            [str(script), "agy", "run", "--prompt", "test installed execution"],
+            cwd=proj_dir,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0, f"stdout: {proc.stdout}, stderr: {proc.stderr}")
+        result = json.loads(proc.stdout)
+        self.assertEqual(result["status"], "SUCCESS")
+        self.assertEqual(result["response"], "INSTALLED_OK")
+
+        # Also test start + wait lifecycle under installed layout
+        start_proc = subprocess.run(
+            [str(script), "agy", "start", "--prompt", "test installed start"],
+            cwd=proj_dir,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(start_proc.returncode, 0, f"stdout: {start_proc.stdout}, stderr: {start_proc.stderr}")
+        start_desc = json.loads(start_proc.stdout)
+        job_id = start_desc["job_id"]
+        wait_proc = subprocess.run(
+            [str(script), "wait", job_id],
+            cwd=proj_dir,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(wait_proc.returncode, 0, f"stdout: {wait_proc.stdout}, stderr: {wait_proc.stderr}")
+        wait_result = json.loads(wait_proc.stdout)
+        self.assertEqual(wait_result["status"], "SUCCESS")
+        self.assertEqual(wait_result["response"], "INSTALLED_OK")
 
 
 class AgyAdapterTests(unittest.TestCase):

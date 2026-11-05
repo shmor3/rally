@@ -23,6 +23,7 @@ from .model import (
     JOB_ID_PATTERN,
     MAX_EVENT_BYTES,
     PERMISSION_POLICY,
+    RUNNER_MODULE,
     RUNNER_PATH,
     SCHEMA_VERSION,
     SUMMARY_FIELDS,
@@ -305,6 +306,19 @@ def _restore_launch_environment(job: Job) -> None:
         _remove_launch_environment(job)
 
 
+def _worker_env(base_env: Mapping[str, str] | None = None) -> dict[str, str]:
+    env = dict(os.environ if base_env is None else base_env)
+    package_parent = str(Path(__file__).resolve().parents[1])
+    pythonpath = env.get("PYTHONPATH")
+    if not pythonpath:
+        env["PYTHONPATH"] = package_parent
+    else:
+        parts = pythonpath.split(os.pathsep)
+        if package_parent not in parts:
+            env["PYTHONPATH"] = f"{package_parent}{os.pathsep}{pythonpath}"
+    return env
+
+
 def _group_has_members(pgid: int) -> bool:
     """Keep supervisor alive while non-zombie provider descendants remain."""
     try:
@@ -429,11 +443,11 @@ class JobManager:
         launcher = self._launcher()
         job = self.store.create(request)
         token = secrets.token_hex(32)
-        atomic_write(job.directory / "worker.json", _json_text({"token": token, "pid": None, "pgid": None, "runner": str(RUNNER_PATH), "launcher": launcher}))
+        atomic_write(job.directory / "worker.json", _json_text({"token": token, "pid": None, "pgid": None, "runner": RUNNER_MODULE, "launcher": launcher}))
         for name in ("stdout.jsonl", "stderr.log", "manager.stdout.log", "manager.stderr.log"):
             atomic_write(job.directory / name, "")
         if launcher == "launchctl":
-            atomic_write(job.directory / "launch-environment.json", _json_text(dict(os.environ)))
+            atomic_write(job.directory / "launch-environment.json", _json_text(_worker_env()))
         try:
             self._launch(job, token)
         except (OSError, ValueError, subprocess.SubprocessError) as error:
@@ -481,7 +495,7 @@ class JobManager:
             return None
 
     def _launch(self, job: Job, token: str) -> None:
-        command = [sys.executable, str(RUNNER_PATH), "--_worker", str(self.store.root), job.job_id, token]
+        command = [sys.executable, "-m", RUNNER_MODULE, "--_worker", str(self.store.root), job.job_id, token]
         stdout = job.directory / "manager.stdout.log"
         stderr = job.directory / "manager.stderr.log"
         with _append_stream(stdout) as out, _append_stream(stderr) as err:
@@ -494,6 +508,7 @@ class JobManager:
                 child = subprocess.Popen(
                     command, cwd=job.directory, stdin=subprocess.DEVNULL,
                     stdout=out, stderr=err, start_new_session=True, close_fds=True,
+                    env=_worker_env(),
                 )
                 self._children[job.job_id] = child
                 threading.Thread(target=child.wait, daemon=True).start()
@@ -515,10 +530,17 @@ class JobManager:
                                     capture_output=True, text=True, check=True).stdout.strip()
             # ps does not preserve quoting for paths containing spaces. The
             # internal worker has a fixed marker and two space-free final args.
-            marker = f" {RUNNER_PATH} --_worker "
-            executable, arguments = output.split(marker, 1)
-            root, job_id, token = arguments.rsplit(" ", 2)
-            return [executable, str(RUNNER_PATH), "--_worker", root, job_id, token]
+            module_marker = f" -m {RUNNER_MODULE} --_worker "
+            legacy_marker = f" {RUNNER_PATH} --_worker "
+            if module_marker in output:
+                executable, arguments = output.split(module_marker, 1)
+                root, job_id, token = arguments.rsplit(" ", 2)
+                return [executable, "-m", RUNNER_MODULE, "--_worker", root, job_id, token]
+            if legacy_marker in output:
+                executable, arguments = output.split(legacy_marker, 1)
+                root, job_id, token = arguments.rsplit(" ", 2)
+                return [executable, str(RUNNER_PATH), "--_worker", root, job_id, token]
+            return []
         except (OSError, ValueError, subprocess.SubprocessError):
             return []
 
@@ -536,9 +558,10 @@ class JobManager:
         if current_birth is None or current_birth != birth:
             return False
         command = self._process_argv(pid)
-        expected = [str(RUNNER_PATH), "--_worker", str(self.store.root), job.job_id, token]
+        expected_module = ["-m", RUNNER_MODULE, "--_worker", str(self.store.root), job.job_id, token]
+        expected_legacy = [str(RUNNER_PATH), "--_worker", str(self.store.root), job.job_id, token]
         executable = identity.get("executable")
-        return (len(command) == 6 and command[1:] == expected and isinstance(executable, str)
+        return (len(command) in (6, 7) and command[1:] in (expected_module, expected_legacy) and isinstance(executable, str)
                 and Path(command[0]).resolve() == Path(executable).resolve())
 
     @staticmethod
@@ -610,7 +633,7 @@ class JobManager:
                 or not isinstance(provider, dict) or provider.get("pid") != pgid
                 or pgid == os.getpgrp() or not isinstance(token, str)
                 or re.fullmatch(r"[0-9a-f]{64}", token) is None
-                or identity.get("runner") != str(RUNNER_PATH)
+                or identity.get("runner") not in {RUNNER_MODULE, str(RUNNER_PATH)}
                 or not isinstance(executable, str) or not Path(executable).is_absolute()
                 or not Path(executable).is_file() or not isinstance(command, list) or not command
                 or any(not isinstance(value, str) or "\0" in value for value in command)):
@@ -1015,9 +1038,9 @@ def provider_main(root: Path, job_id: str, token: str) -> int:
         request = _read_json(job.directory / "request.json")
         os.chdir(_directory(Path(request["cwd"]), "cwd"))
         command = identity["provider_command"]
-        sentinel = subprocess.Popen([sys.executable, str(RUNNER_PATH), "--_sentinel", str(root), job_id, token],
+        sentinel = subprocess.Popen([sys.executable, "-m", RUNNER_MODULE, "--_sentinel", str(root), job_id, token],
                                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                    close_fds=True)
+                                    close_fds=True, env=_worker_env())
         identity["sentinel_pid"] = sentinel.pid
         atomic_write(job.directory / "worker.json", _json_text(identity))
         atomic_write(job.directory / "provider-ready", token + "\n")
@@ -1079,9 +1102,9 @@ def worker_main(root: Path, job_id: str, token: str, *, adapters: Mapping[str, P
                     identity["provider_command"] = command
                     atomic_write(job.directory / "worker.json", _json_text(identity))
                     metadata.update(status="RUNNING", started_at=time.time())
-                    gated = [sys.executable, str(RUNNER_PATH), "--_provider", str(manager.store.root), job_id, token]
+                    gated = [sys.executable, "-m", RUNNER_MODULE, "--_provider", str(manager.store.root), job_id, token]
                     process = subprocess.Popen(gated, cwd=request.cwd, stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr,
-                                               env={**os.environ, "AGENT_JOB_WORKER_TOKEN": token}, close_fds=True,
+                                               env={**_worker_env(), "AGENT_JOB_WORKER_TOKEN": token}, close_fds=True,
                                                start_new_session=True)
                     spawn_birth = None
                     try:

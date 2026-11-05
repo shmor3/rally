@@ -15,6 +15,7 @@ EFFORT_LEVELS = frozenset({"none", "minimal", "low", "medium", "high", "xhigh", 
 PERMISSION_POLICY = "Providers run autonomously with permission/sandbox bypass flags."
 JOB_ID_PATTERN = re.compile(r"[0-9]{8}T[0-9]{6}Z-[0-9a-f]{12}")
 TERMINAL_STATES = frozenset({"SUCCESS", "ERROR", "STOPPED"})
+RUNNER_MODULE = "rally_core"
 RUNNER_PATH = (Path(__file__).resolve().parents[1] / "rally").resolve()
 SUMMARY_FIELDS = ("schema_version", "job_id", "provider", "status", "cwd", "model", "effort", "session_id", "created_at", "source_job_id", "transcript_dir")
 PROVIDERS = ("agy", "copilot", "codex", "claude")
