@@ -1233,17 +1233,21 @@ class AgentJobDoctorTests(unittest.TestCase):
             with mock.patch.dict(os.environ, {}, clear=False):
                 os.environ.pop("AGENT_JOB_DIR", None)
 
-                # Starting a job targeting workspace_path places the store in workspace_path/.artifacts/agent-jobs
-                manager = rally_core.process.JobManager(
-                    rally_core.store.JobStore(cwd=workspace_path),
-                )
+                # Store resolved using JobStore.create(); prove no provider process or command is invoked
                 job_req = rally_core.model.JobRequest(
                     provider="codex",
                     prompt="test prompt",
                     cwd=workspace_path,
                 )
-                summary = manager.start(job_req)
-                job_id = summary["job_id"]
+                with mock.patch.object(subprocess, "Popen") as mock_popen, \
+                     mock.patch.object(subprocess, "run") as mock_run, \
+                     mock.patch.object(rally_core.process.JobManager, "_launch") as mock_launch:
+                    ws_store = rally_core.store.JobStore(cwd=workspace_path)
+                    job = ws_store.create(job_req)
+                    job_id = job.job_id
+                    mock_popen.assert_not_called()
+                    mock_run.assert_not_called()
+                    mock_launch.assert_not_called()
 
                 # Store resolved from client_path without AGENT_JOB_DIR cannot find the job
                 client_store = rally_core.store.JobStore(cwd=client_path)
@@ -1251,7 +1255,6 @@ class AgentJobDoctorTests(unittest.TestCase):
                     client_store.get(job_id)
 
                 # Store resolved from workspace_path finds the job
-                ws_store = rally_core.store.JobStore(cwd=workspace_path)
                 job_from_ws = ws_store.get(job_id)
                 self.assertEqual(job_from_ws.job_id, job_id)
 
@@ -1260,6 +1263,28 @@ class AgentJobDoctorTests(unittest.TestCase):
                     env_store = rally_core.store.JobStore(cwd=client_path)
                     job_from_env = env_store.get(job_id)
                     self.assertEqual(job_from_env.job_id, job_id)
+
+    def test_storage_cwd_contract_injected_fixture_adapter_proves_no_provider_invoked(self):
+        with tempfile.TemporaryDirectory() as workspace_dir:
+            workspace_path = Path(workspace_dir).resolve()
+            fixture_adapter = FixtureAdapter()
+            manager = rally_core.process.JobManager(
+                rally_core.store.JobStore(cwd=workspace_path),
+                adapters={"codex": fixture_adapter},
+            )
+            job_req = rally_core.model.JobRequest(
+                provider="codex",
+                prompt="test prompt",
+                cwd=workspace_path,
+            )
+            with mock.patch.object(subprocess, "Popen") as mock_popen, \
+                 mock.patch.object(subprocess, "run") as mock_run, \
+                 mock.patch.object(manager, "_launch") as mock_launch:
+                summary = manager.start(job_req)
+                self.assertTrue(summary.get("job_id"))
+                mock_launch.assert_called_once()
+                mock_popen.assert_not_called()
+                mock_run.assert_not_called()
 
 
 class FixtureAdapter:
