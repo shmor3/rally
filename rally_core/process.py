@@ -297,7 +297,7 @@ LAUNCHCTL_ENV_EXACT_ALLOWLIST = frozenset({
     "XDG_RUNTIME_DIR",
     "XDG_CONFIG_DIRS",
     "XDG_DATA_DIRS",
-    # TLS certificates & Proxies
+    # TLS certificates
     "SSL_CERT_FILE",
     "SSL_CERT_DIR",
     "REQUESTS_CA_BUNDLE",
@@ -305,14 +305,6 @@ LAUNCHCTL_ENV_EXACT_ALLOWLIST = frozenset({
     "NODE_EXTRA_CA_CERTS",
     "GIT_SSL_CAINFO",
     "GIT_SSL_CAPATH",
-    "HTTP_PROXY",
-    "HTTPS_PROXY",
-    "ALL_PROXY",
-    "NO_PROXY",
-    "http_proxy",
-    "https_proxy",
-    "all_proxy",
-    "no_proxy",
     # Python environment
     "PYTHONPATH",
     "PYTHONHOME",
@@ -351,10 +343,10 @@ def _is_launchctl_allowlisted_variable(key: str, value: str) -> bool:
         return False
     if not key or "=" in key or "\0" in key or "\0" in value:
         return False
-    upper_key = key.upper()
-    is_allowed = (key in LAUNCHCTL_ENV_EXACT_ALLOWLIST or bool(_LC_VAR_PATTERN.match(upper_key)))
+    is_allowed = (key in LAUNCHCTL_ENV_EXACT_ALLOWLIST or bool(_LC_VAR_PATTERN.match(key)))
     if not is_allowed:
         return False
+    upper_key = key.upper()
     if key not in LAUNCHCTL_ENV_EXACT_ALLOWLIST:
         if any(keyword in upper_key for keyword in _DISALLOWED_NAME_KEYWORDS):
             return False

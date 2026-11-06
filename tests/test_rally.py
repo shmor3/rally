@@ -2166,7 +2166,20 @@ class AgentJobLifecycleTests(unittest.TestCase):
             "XDG_CONFIG_HOME": "/Users/testuser/.config",
             "SSH_AUTH_SOCK": "/private/tmp/ssh-sock",
             "SSL_CERT_FILE": "/etc/ssl/cert.pem",
-            "HTTPS_PROXY": "http://127.0.0.1:8080",
+            # Proxy variables (all must be excluded to prevent URL userinfo credential leaks)
+            "HTTPS_PROXY": f"https://proxyuser:{CREDENTIAL_SENTINEL}-proxypass@proxy.internal:8080",
+            "HTTP_PROXY": f"http://proxyuser:{CREDENTIAL_SENTINEL}-httppass@proxy.internal:8080",
+            "ALL_PROXY": f"socks5://proxyuser:{CREDENTIAL_SENTINEL}-allpass@proxy.internal:1080",
+            "NO_PROXY": "localhost,127.0.0.1",
+            "http_proxy": "http://proxy.internal:8080",
+            "https_proxy": "http://proxy.internal:8080",
+            "all_proxy": "socks5://proxy.internal:1080",
+            "no_proxy": "localhost",
+            # Lowercase and mixed-case locale variables (must be excluded)
+            "lc_custom": f"{CREDENTIAL_SENTINEL}-lc-custom-val",
+            "Lc_messages": f"{CREDENTIAL_SENTINEL}-lc-mixed-val",
+            "lc_ALL": f"{CREDENTIAL_SENTINEL}-lc-all-val",
+            "LC_custom": f"{CREDENTIAL_SENTINEL}-lc-tail-val",
             # Credential-shaped and arbitrary variables (must be excluded)
             "ANTHROPIC_API_KEY": "sk-ant-test-key-12345678",
             "OPENAI_API_KEY": "sk-proj-test-key-12345678",
@@ -2190,9 +2203,18 @@ class AgentJobLifecycleTests(unittest.TestCase):
         # Allowlisted execution/config variables present
         for key in ("PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "LANG",
                     "LC_ALL", "LC_CTYPE", "XDG_CONFIG_HOME", "SSH_AUTH_SOCK",
-                    "SSL_CERT_FILE", "HTTPS_PROXY"):
+                    "SSL_CERT_FILE"):
             self.assertIn(key, persisted, f"Expected allowlisted variable {key} in launch environment")
             self.assertEqual(persisted[key], sample_env[key])
+
+        # Proxy variables excluded (neither key nor value persists)
+        for key in ("HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "NO_PROXY",
+                    "http_proxy", "https_proxy", "all_proxy", "no_proxy"):
+            self.assertNotIn(key, persisted, f"Proxy variable {key} must not be persisted")
+
+        # Lowercase and mixed-case locale variables excluded (neither key nor value persists)
+        for key in ("lc_custom", "Lc_messages", "lc_ALL", "LC_custom"):
+            self.assertNotIn(key, persisted, f"Non-uppercase locale variable {key} must not be persisted")
 
         # Credential-shaped and arbitrary variables absent
         for key in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GITHUB_TOKEN", "AWS_SECRET_ACCESS_KEY",
