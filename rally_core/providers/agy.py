@@ -104,7 +104,8 @@ class AgyAdapter:
                 session_id = None
             else:
                 _model._single_line(session_id, "AGY conversation_id")
-        success = exit_code == 0 and terminal["status"] == "SUCCESS"
+        has_nonempty_response = bool(response.strip())
+        success = exit_code == 0 and terminal["status"] == "SUCCESS" and has_nonempty_response
         error = None
         if not success:
             provider_error = terminal.get("error")
@@ -124,6 +125,8 @@ class AgyAdapter:
                 else:
                     error = {"type": "provider_error",
                              "message": _process._public_text(text_to_check)}
+            elif terminal["status"] == "SUCCESS" and not has_nonempty_response:
+                error = {"type": "parse_error", "message": "AGY output contains no nonempty response"}
             else:
                 error = {"type": "provider_exit", "message": f"AGY exited with status {exit_code}"}
         usage = terminal.get("usage", {})

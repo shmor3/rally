@@ -3208,6 +3208,43 @@ class AgyAdapterTests(unittest.TestCase):
         self.assertTrue(outcome.success)
         self.assertEqual(outcome.response, "final")
 
+    def test_terminal_success_with_empty_or_whitespace_response_returns_parse_error(self):
+        for empty_resp in ("", "   ", "\n\t  "):
+            with self.subTest(empty_resp=empty_resp):
+                raw = self.workspace / "empty_success.jsonl"
+                raw.write_text(json.dumps({
+                    "status": "SUCCESS",
+                    "response": empty_resp,
+                    "conversation_id": "agy-conv-123",
+                    "usage": {"input_tokens": 10, "output_tokens": 0},
+                }))
+                outcome = rally_core.AgyAdapter().parse(raw, 0)
+                self.assertFalse(outcome.success)
+                self.assertEqual(outcome.error["type"], "parse_error")
+                self.assertTrue(outcome.error.get("message"))
+                self.assertEqual(outcome.session_id, "agy-conv-123")
+                self.assertEqual(outcome.usage, {"input_tokens": 10, "output_tokens": 0})
+                self.assertEqual(outcome.provider_result.get("status"), "SUCCESS")
+
+    def test_empty_success_response_with_zero_exit_becomes_nonzero_error_job(self):
+        empty_payload = json.dumps({
+            "status": "SUCCESS",
+            "response": "   \n\t ",
+            "conversation_id": "conv-empty-terminal",
+            "usage": {"tokens": 4},
+        })
+        completed = self.run_job(environment={"FAKE_AGY_OUTPUT": empty_payload, "FAKE_AGY_EXIT": "0"})
+        self.assertNotEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(completed.returncode, 1)
+        result = json.loads(completed.stdout)
+        self.assertEqual(result["status"], "ERROR")
+        self.assertEqual(result["exit_code"], 1)
+        self.assertEqual(result["error"]["type"], "parse_error")
+        self.assertTrue(result["error"]["message"])
+        self.assertEqual(result["session_id"], "conv-empty-terminal")
+        self.assertEqual(result["usage"], {"tokens": 4})
+        self.assertEqual(result["provider_result"]["status"], "SUCCESS")
+
     def test_bare_nonzero_exit_without_result_classifies_as_provider_exit(self):
         raw = self.workspace / "bare-exit.jsonl"
         raw.write_text("")
