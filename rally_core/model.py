@@ -92,7 +92,7 @@ Providers and examples:
   Codex/Claude omitted model/effort use provider defaults.
 
 Environment and portability:
-  Python 3.9+, standard library only; no .venv, external dependencies, or global install.
+  Linux and macOS only; Python 3.9+, standard library only; no .venv, external dependencies, or global install.
   Use /absolute/path/to/rally from any repository with --cwd DIR.
   AGENT_JOB_DIR overrides transcript root (relative to caller cwd).
   AGENT_JOB_LAUNCHER=auto|launchctl|detached; auto uses launchctl on macOS and

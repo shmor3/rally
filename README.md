@@ -24,6 +24,7 @@ Rally is a lightweight, durable multi-provider agent job runner. It provides a u
 
 ## Requirements
 
+- Operating System: Linux and macOS only.
 - Python >= 3.9 (standard library only; no virtual environment or external packages required).
 - Provider CLI tools installed on `PATH` for providers you intend to run (`agy`, `copilot`, `codex`, `claude`).
 

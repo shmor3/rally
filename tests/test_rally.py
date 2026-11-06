@@ -117,6 +117,35 @@ class RallyRepositoryTests(unittest.TestCase):
             self.assertIn("Issues", data["project"]["urls"])
             self.assertIn("Documentation", data["project"]["urls"])
 
+    def test_platform_scope_classifiers_and_documentation(self):
+        pyproject_path = ROOT / "pyproject.toml"
+        metadata = pyproject_path.read_text(encoding="utf-8")
+        readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
+        help_text = rally_core.model.HELP_TEXT
+
+        try:
+            import tomllib
+        except ImportError:
+            try:
+                import tomli as tomllib
+            except ImportError:
+                tomllib = None
+        if tomllib is not None:
+            data = tomllib.loads(metadata)
+            classifiers = data["project"]["classifiers"]
+            self.assertIn("Operating System :: MacOS", classifiers)
+            self.assertIn("Operating System :: POSIX :: Linux", classifiers)
+            self.assertNotIn("Operating System :: POSIX", classifiers)
+            for c in classifiers:
+                self.assertNotIn("Windows", c)
+                self.assertNotIn("BSD", c)
+
+        # Documentation assertions: Linux and macOS only
+        self.assertIn("Operating System: Linux and macOS only", readme_text)
+        self.assertNotIn("Windows", readme_text)
+        self.assertNotIn("BSD", readme_text)
+        self.assertIn("Linux and macOS only", help_text)
+
     def test_standalone_documentation_exists(self):
         self.assertTrue((ROOT / "README.md").is_file())
         self.assertTrue((ROOT / "docs" / "architecture.md").is_file())
