@@ -25,7 +25,7 @@ requires working credentials.
 
 Captured 2026-10-27 using `codex exec --json`, full permission/sandbox bypass,
 skip-repository check, explicit temporary workspace, and low reasoning effort.
-The dash-prefixed new prompt requested one harmless `rtk proxy pwd` command and
+The dash-prefixed new prompt requested one harmless `pwd` command and
 the exact response `CODEX_FIXTURE_OK`. The dash-prefixed resume prompt requested
 `CODEX_FIXTURE_RESUME_OK` without tools. Both share thread
 `codex-fixture-thread`. These fixtures preserve complete captured

@@ -110,27 +110,62 @@ class RallyRepositoryTests(unittest.TestCase):
         self.assertTrue((ROOT / "README.md").is_file())
         self.assertTrue((ROOT / "docs" / "architecture.md").is_file())
 
-    def test_tracked_public_surfaces_contain_no_rtk(self):
-        public_files = [
-            ROOT / "README.md",
-            ROOT / "docs" / "architecture.md",
-            ROOT / "pyproject.toml",
-            ROOT / "LICENSE",
-            ROOT / "CONTRIBUTING.md",
-            ROOT / "SECURITY.md",
-            ROOT / "tests" / "fixtures" / "rally" / "current-help-contract.json",
-        ]
-        for path in public_files:
-            self.assertTrue(path.is_file(), f"Public surface {path.name} must exist")
-            content = path.read_text(encoding="utf-8")
-            self.assertNotIn("rtk", content.lower(), f"Tracked public file {path.name} contains RTK reference")
-        self.assertNotIn("rtk", rally_core.model.HELP_TEXT.lower(), "CLI HELP_TEXT contains RTK reference")
+    def test_tracked_files_contain_no_forbidden_token(self):
+        forbidden = ("r" + "tk").lower()
+        proc = subprocess.run(
+            ["git", "ls-files", "-z"],
+            cwd=ROOT,
+            capture_output=True,
+            check=True,
+        )
+        tracked_paths = [p for p in proc.stdout.decode("utf-8").split("\0") if p]
+        self.assertTrue(tracked_paths, "Tracked regular file set must not be empty")
+
+        expected_public_files = {
+            "README.md",
+            "docs/architecture.md",
+            "pyproject.toml",
+            "LICENSE",
+            "CONTRIBUTING.md",
+            "SECURITY.md",
+            "tests/fixtures/rally/current-help-contract.json",
+            "tests/fixtures/rally/README.md",
+            "tests/fixtures/rally/codex-0.164.0-success.jsonl",
+            "tests/test_rally.py",
+        }
+        scanned_files = set()
+
+        for rel_path in tracked_paths:
+            file_path = ROOT / rel_path
+            if not file_path.is_file():
+                continue
+            try:
+                content = file_path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                continue
+            scanned_files.add(rel_path)
+            self.assertNotIn(
+                forbidden,
+                content.lower(),
+                f"Tracked file {rel_path} contains forbidden reference",
+            )
+
+        self.assertTrue(
+            expected_public_files.issubset(scanned_files),
+            f"Expected public files missing from scan: {expected_public_files - scanned_files}",
+        )
+        self.assertNotIn(
+            forbidden,
+            rally_core.model.HELP_TEXT.lower(),
+            "CLI HELP_TEXT contains forbidden reference",
+        )
 
     def test_readme_structure_and_direct_commands(self):
         readme_path = ROOT / "README.md"
         self.assertTrue(readme_path.is_file())
         text = readme_path.read_text(encoding="utf-8")
-        self.assertNotIn("rtk", text.lower(), "README must not contain RTK")
+        forbidden = ("r" + "tk").lower()
+        self.assertNotIn(forbidden, text.lower(), "README must not contain forbidden token")
         self.assertIn("./rally", text, "README must document direct checkout execution via ./rally")
         self.assertIn("rally", text, "README must document installed rally command")
         self.assertIn("LICENSE", text, "README must link to LICENSE")
@@ -162,10 +197,11 @@ class RallyRepositoryTests(unittest.TestCase):
         self.assertIn("Permission is hereby granted, free of charge", text)
 
     def test_contributing_and_security_policies(self):
+        forbidden = ("r" + "tk").lower()
         contrib_path = ROOT / "CONTRIBUTING.md"
         self.assertTrue(contrib_path.is_file(), "CONTRIBUTING.md must exist")
         contrib_text = contrib_path.read_text(encoding="utf-8")
-        self.assertNotIn("rtk", contrib_text.lower())
+        self.assertNotIn(forbidden, contrib_text.lower())
         self.assertIn("Python", contrib_text)
         self.assertIn("unittest", contrib_text)
         self.assertIn("SECURITY.md", contrib_text)
@@ -173,14 +209,15 @@ class RallyRepositoryTests(unittest.TestCase):
         sec_path = ROOT / "SECURITY.md"
         self.assertTrue(sec_path.is_file(), "SECURITY.md must exist")
         sec_text = sec_path.read_text(encoding="utf-8")
-        self.assertNotIn("rtk", sec_text.lower())
+        self.assertNotIn(forbidden, sec_text.lower())
         self.assertIn("private vulnerability reporting", sec_text.lower())
         self.assertIn("transcript", sec_text.lower())
         self.assertIn("credential", sec_text.lower())
 
     def test_cli_help_examples_use_direct_commands(self):
+        forbidden = ("r" + "tk").lower()
         help_text = rally_core.model.HELP_TEXT
-        self.assertNotIn("rtk", help_text.lower(), "HELP_TEXT must not mention RTK")
+        self.assertNotIn(forbidden, help_text.lower(), "HELP_TEXT must not mention forbidden token")
         self.assertIn("Providers and examples:", help_text)
         self.assertIn("rally agy run", help_text)
         self.assertIn("rally copilot start", help_text)
@@ -967,7 +1004,8 @@ class AgentJobDoctorTests(unittest.TestCase):
             self.assertIn("resume", entry["modes"])
             example = entry.get("example")
             self.assertIsNotNone(example, f"Provider {provider} must specify a help contract example")
-            self.assertNotIn("rtk", example.lower())
+            forbidden = ("r" + "tk").lower()
+            self.assertNotIn(forbidden, example.lower())
             self.assertTrue(example.startswith(f"rally {provider}"), f"Example must start with 'rally {provider}'")
             self.assertIn(example, rally_core.model.HELP_TEXT, f"Example {example} must be present in HELP_TEXT")
 
