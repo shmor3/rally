@@ -38,6 +38,9 @@ classifiers = [
     "Topic :: Software Development :: Build Tools",
 ]
 
+[project.optional-dependencies]
+test = ["PyYAML>=6.0,<7"]
+
 [project.urls]
 Repository = "https://github.com/shmor3/rally"
 Issues = "https://github.com/shmor3/rally/issues"

@@ -23,18 +23,21 @@ cd rally
 ./rally doctor
 ```
 
-Alternatively, install Rally in editable mode:
+Alternatively, install Rally in editable mode with development test extras:
 
 ```bash
-pip install -e .
+pip install -e '.[test]'
 rally --help
 ```
 
 ## Running Tests
 
-Tests are written using Python's standard `unittest` framework. No third-party test runners are needed.
+Tests are written using Python's standard `unittest` framework and require the optional `test` dependency group (e.g. PyYAML):
 
 ```bash
+# Install development test dependencies
+pip install '.[test]'
+
 # Run the entire test suite
 python3 -m unittest discover tests
 

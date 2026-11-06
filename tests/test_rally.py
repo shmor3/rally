@@ -18,6 +18,7 @@ import threading
 import time
 import unittest
 from unittest import mock
+import yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -44,89 +45,6 @@ class RallyIdentityTests(unittest.TestCase):
         self.assertEqual(primary.returncode, 0)
         self.assertEqual(compat.returncode, 0)
         self.assertEqual(primary.stdout, compat.stdout)
-
-
-def parse_simple_yaml(text: str):
-    """Parse lightweight YAML workflow files without third-party dependencies."""
-    lines = text.splitlines()
-
-    def get_indent(line: str) -> int:
-        return len(line) - len(line.lstrip(" "))
-
-    def parse_value(val: str):
-        val = val.strip()
-        if val.startswith("[") and val.endswith("]"):
-            return [parse_value(x) for x in val[1:-1].split(",") if x.strip()]
-        if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
-            return val[1:-1]
-        if val.lower() == "true":
-            return True
-        if val.lower() == "false":
-            return False
-        return val
-
-    i = 0
-
-    def parse_block(indent: int):
-        nonlocal i
-        block_dict = {}
-        block_list = []
-        is_list = False
-
-        while i < len(lines):
-            line = lines[i]
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#"):
-                i += 1
-                continue
-            cur_indent = get_indent(line)
-            if cur_indent < indent:
-                break
-
-            if stripped.startswith("- "):
-                is_list = True
-                item_content = stripped[2:].strip()
-                if ":" in item_content and not item_content.startswith("http"):
-                    k, v = item_content.split(":", 1)
-                    k = k.strip()
-                    v = v.strip()
-                    i += 1
-                    sub = parse_block(cur_indent + 2)
-                    if isinstance(sub, dict):
-                        if v:
-                            sub[k] = parse_value(v)
-                    block_list.append(sub)
-                else:
-                    i += 1
-                    block_list.append(parse_value(item_content))
-            elif ":" in stripped:
-                k, v = stripped.split(":", 1)
-                k = k.strip()
-                v = v.strip()
-                i += 1
-                if v == "|":
-                    pipe_lines = []
-                    while i < len(lines):
-                        next_line = lines[i]
-                        if not next_line.strip():
-                            pipe_lines.append("")
-                            i += 1
-                            continue
-                        next_indent = get_indent(next_line)
-                        if next_indent <= cur_indent:
-                            break
-                        pipe_lines.append(next_line[cur_indent + 2:])
-                        i += 1
-                    block_dict[k] = "\n".join(pipe_lines).strip()
-                elif v == "":
-                    block_dict[k] = parse_block(cur_indent + 2)
-                else:
-                    block_dict[k] = parse_value(v)
-            else:
-                i += 1
-        return block_list if is_list else block_dict
-
-    return parse_block(0)
 
 
 class RallyRepositoryTests(unittest.TestCase):
@@ -161,6 +79,8 @@ class RallyRepositoryTests(unittest.TestCase):
         metadata = pyproject_path.read_text()
         self.assertIn('requires-python = ">=3.9"', metadata)
         self.assertIn("dependencies = []", metadata)
+        self.assertIn("[project.optional-dependencies]", metadata)
+        self.assertIn('test = ["PyYAML>=6.0,<7"]', metadata)
         self.assertIn('license = { file = "LICENSE" }', metadata)
         self.assertIn('packages = ["rally_core", "rally_core.providers"]', metadata)
         self.assertIn('authors = [{ name = "shmor3" }]', metadata)
@@ -180,6 +100,10 @@ class RallyRepositoryTests(unittest.TestCase):
             self.assertEqual(data["project"]["name"], "rally-agent")
             self.assertEqual(data["project"]["requires-python"], ">=3.9")
             self.assertEqual(data["project"]["dependencies"], [])
+            self.assertEqual(
+                data["project"]["optional-dependencies"],
+                {"test": ["PyYAML>=6.0,<7"]},
+            )
             self.assertEqual(data["project"]["authors"], [{"name": "shmor3"}])
             self.assertEqual(data["project"]["license"], {"file": "LICENSE"})
             self.assertEqual(data["project"]["readme"], "README.md")
@@ -252,6 +176,7 @@ class RallyRepositoryTests(unittest.TestCase):
         self.assertNotIn(forbidden, text.lower(), "README must not contain forbidden token")
         self.assertIn("./rally", text, "README must document direct checkout execution via ./rally")
         self.assertIn("rally", text, "README must document installed rally command")
+        self.assertIn(".[test]", text, "README must document test extra installation")
         self.assertIn("LICENSE", text, "README must link to LICENSE")
         self.assertIn("CONTRIBUTING.md", text, "README must link to CONTRIBUTING.md")
         self.assertIn("SECURITY.md", text, "README must link to SECURITY.md")
@@ -288,6 +213,7 @@ class RallyRepositoryTests(unittest.TestCase):
         self.assertNotIn(forbidden, contrib_text.lower())
         self.assertIn("Python", contrib_text)
         self.assertIn("unittest", contrib_text)
+        self.assertIn(".[test]", contrib_text)
         self.assertIn("SECURITY.md", contrib_text)
 
         sec_path = ROOT / "SECURITY.md"
@@ -329,24 +255,59 @@ class RallyRepositoryTests(unittest.TestCase):
         self.assertNotIn("upload-artifact", raw_text, "Workflow must not upload artifacts")
         self.assertNotIn("download-artifact", raw_text, "Workflow must not download artifacts")
 
-        parsed = parse_simple_yaml(raw_text)
+        parsed = yaml.safe_load(raw_text)
+        self.assertIsInstance(parsed, dict, "Workflow must parse into a YAML mapping")
         self.assertEqual(parsed.get("name"), "CI")
 
-        # Triggers
-        triggers = parsed.get("on", {})
-        self.assertIn("push", triggers)
-        self.assertIn("pull_request", triggers)
-        self.assertEqual(triggers["push"].get("branches"), ["main"])
-        self.assertEqual(triggers["pull_request"].get("branches"), ["main"])
+        # Triggers: handle PyYAML's YAML 1.1 'on' boolean key behavior explicitly
+        triggers = parsed.get("on") if "on" in parsed else parsed.get(True)
+        self.assertIsInstance(triggers, dict, "Workflow triggers ('on') must parse to a dictionary")
         self.assertEqual(set(triggers.keys()), {"push", "pull_request"})
+        self.assertEqual(triggers["push"], {"branches": ["main"]})
+        self.assertEqual(triggers["pull_request"], {"branches": ["main"]})
 
         # Top-level permissions
         self.assertEqual(parsed.get("permissions"), {"contents": "read"})
 
+        # Recursive permissions validation and escalation prevention
+        def collect_permissions(node, path=""):
+            found = []
+            if isinstance(node, dict):
+                for k, v in node.items():
+                    cur = f"{path}.{k}" if path else str(k)
+                    if k == "permissions":
+                        found.append((cur, v))
+                    found.extend(collect_permissions(v, cur))
+            elif isinstance(node, list):
+                for idx, item in enumerate(node):
+                    found.extend(collect_permissions(item, f"{path}[{idx}]"))
+            return found
+
+        permission_entries = collect_permissions(parsed)
+        self.assertEqual(len(permission_entries), 1, "Only top-level permissions must be defined")
+        self.assertEqual(permission_entries[0][0], "permissions")
+        self.assertEqual(permission_entries[0][1], {"contents": "read"})
+
+        # Verify no job or step escalates permissions
+        for job_name, job_body in parsed.get("jobs", {}).items():
+            self.assertNotIn("permissions", job_body, f"Job {job_name} must not define or escalate permissions")
+            for step_idx, step_body in enumerate(job_body.get("steps", [])):
+                self.assertNotIn("permissions", step_body, f"Step {step_idx} in job {job_name} must not define or escalate permissions")
+
+        # Recursively validate permission values
+        for path, perm_spec in permission_entries:
+            if isinstance(perm_spec, dict):
+                for perm_name, perm_val in perm_spec.items():
+                    self.assertIn(perm_val, {"read", "none"}, f"Permission {perm_name} at {path} must be read-only")
+            elif isinstance(perm_spec, str):
+                self.assertIn(perm_spec, {"read-all", "contents: read"}, f"Permission string at {path} must be read-only")
+
         # Concurrency
-        concurrency = parsed.get("concurrency", {})
-        self.assertEqual(concurrency.get("group"), "${{ github.workflow }}-${{ github.ref }}")
-        self.assertEqual(concurrency.get("cancel-in-progress"), True)
+        concurrency = parsed.get("concurrency")
+        self.assertEqual(concurrency, {
+            "group": "${{ github.workflow }}-${{ github.ref }}",
+            "cancel-in-progress": True,
+        })
 
         # Jobs and matrix
         jobs = parsed.get("jobs", {})
@@ -356,32 +317,60 @@ class RallyRepositoryTests(unittest.TestCase):
         strategy = test_job.get("strategy", {})
         self.assertEqual(strategy.get("fail-fast"), False)
         matrix = strategy.get("matrix", {})
-        self.assertEqual(matrix.get("python-version"), ["3.9", "3.12", "3.15"])
+        self.assertEqual(matrix, {"python-version": ["3.9", "3.12", "3.15"]})
 
         # Steps
         steps = test_job.get("steps", [])
-        self.assertTrue(len(steps) >= 5, "Workflow must contain required step pipeline")
+        self.assertTrue(len(steps) >= 6, "Workflow must contain required step pipeline")
 
-        # Third-party actions bounded strictly to checkout and setup-python
-        uses_actions = [s["uses"] for s in steps if "uses" in s]
-        self.assertEqual(uses_actions, ["actions/checkout@v4", "actions/setup-python@v5"])
+        # Ordered third-party action uses bounded strictly to checkout and setup-python
+        action_steps = [s for s in steps if "uses" in s]
+        self.assertEqual(
+            [s["uses"] for s in action_steps],
+            ["actions/checkout@v4", "actions/setup-python@v5"],
+        )
+        self.assertEqual(
+            action_steps[1].get("with", {}).get("python-version"),
+            "${{ matrix.python-version }}",
+        )
 
-        setup_step = next(s for s in steps if s.get("uses") == "actions/setup-python@v5")
-        self.assertEqual(setup_step.get("with", {}).get("python-version"), "${{ matrix.python-version }}")
+        run_steps = [s for s in steps if "run" in s]
+        self.assertEqual(len(action_steps) + len(run_steps), len(steps))
+        for step in run_steps:
+            self.assertTrue(step.get("name"), "Run step must have a descriptive name")
+            self.assertTrue(step.get("run"), "Run step must have a non-empty run script")
 
-        all_runs = "\n".join(s.get("run", "") for s in steps)
-        self.assertIn("pip install --upgrade", all_runs)
-        self.assertIn("pip install .", all_runs)
-        self.assertIn("python -m unittest tests.test_rally", all_runs)
-        self.assertIn("python -m py_compile", all_runs)
-        self.assertIn("rally", all_runs)
-        self.assertIn("agent-job", all_runs)
-        self.assertIn("rally_core", all_runs)
-        self.assertIn("./rally --help", all_runs)
-        self.assertIn("./agent-job --help", all_runs)
-        self.assertIn("rally --help", all_runs)
-        self.assertIn("RallyRepositoryTests", all_runs)
-        self.assertIn("AgentJobPrivacyRegressionTests", all_runs)
+        # 1. Dependency installation: must install '.[test]' extra and upgrade tooling
+        install_step = next(s for s in run_steps if ".[test]" in s["run"])
+        self.assertIn("pip install --upgrade pip setuptools wheel", install_step["run"])
+        self.assertIn("pip install '.[test]'", install_step["run"])
+
+        # 2. Test suite execution
+        unit_step = next(s for s in run_steps if "unittest tests.test_rally" in s["run"])
+        self.assertEqual(unit_step["run"].strip(), "python -m unittest tests.test_rally")
+
+        # 3. Byte-compilation
+        compile_step = next(s for s in run_steps if "py_compile" in s["run"])
+        self.assertIn("python -m py_compile", compile_step["run"])
+        self.assertIn("rally", compile_step["run"])
+        self.assertIn("agent-job", compile_step["run"])
+        self.assertIn("rally_core/*.py", compile_step["run"])
+        self.assertIn("rally_core/providers/*.py", compile_step["run"])
+
+        # 4. Isolated plain-install smoke: proves runtime has no dependency on PyYAML
+        plain_smoke_step = next(s for s in run_steps if "pip install ." in s["run"] and ".[test]" not in s["run"])
+        self.assertIn("venv", plain_smoke_step["run"])
+        self.assertIn("pip install .", plain_smoke_step["run"])
+        self.assertIn("rally --help", plain_smoke_step["run"])
+        self.assertIn("import rally_core", plain_smoke_step["run"])
+        self.assertIn("import yaml", plain_smoke_step["run"])
+
+        # 5. CLI help and privacy smoke checks
+        smoke_step = next(s for s in run_steps if "RallyRepositoryTests" in s["run"])
+        self.assertIn("./rally --help", smoke_step["run"])
+        self.assertIn("./agent-job --help", smoke_step["run"])
+        self.assertIn("rally --help", smoke_step["run"])
+        self.assertIn("AgentJobPrivacyRegressionTests", smoke_step["run"])
 
 
 def parse_provider_fixture(case, provider, name, exit_code=0):

@@ -193,9 +193,12 @@ Each directory contains:
 
 ## Development and Testing
 
-Tests run using Python's standard `unittest` framework:
+Tests run using Python's standard `unittest` framework and require the `test` extra dependency group:
 
 ```bash
+# Install development test dependencies
+pip install '.[test]'
+
 # Run focused repository and metadata tests
 python3 -m unittest tests.test_rally.RallyRepositoryTests
 

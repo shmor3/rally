@@ -36,10 +36,10 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Upgrade build tooling and install project
+      - name: Upgrade build tooling and install test dependencies
         run: |
           python -m pip install --upgrade pip setuptools wheel
-          python -m pip install .
+          python -m pip install '.[test]'
 
       - name: Run test suite
         run: |
@@ -48,6 +48,16 @@ jobs:
       - name: Byte-compile package and entry scripts
         run: |
           python -m py_compile rally agent-job rally_core/*.py rally_core/providers/*.py
+
+      - name: Isolated plain installation smoke
+        run: |
+          python -m venv /tmp/plain-install-env
+          /tmp/plain-install-env/bin/python -m pip install --upgrade pip setuptools wheel
+          /tmp/plain-install-env/bin/python -m pip install .
+          /tmp/plain-install-env/bin/rally --help
+          /tmp/plain-install-env/bin/agent-job --help
+          /tmp/plain-install-env/bin/python -c "import rally_core"
+          /tmp/plain-install-env/bin/python -c "import sys, subprocess; res = subprocess.run([sys.executable, '-c', 'import yaml'], capture_output=True); assert res.returncode != 0, 'PyYAML must not be present in plain runtime install'"
 
       - name: CLI and privacy smoke checks
         run: |
