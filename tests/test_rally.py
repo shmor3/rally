@@ -3292,6 +3292,62 @@ class AgyAdapterTests(unittest.TestCase):
         self.assertEqual(result["usage"], {"tokens": 4})
         self.assertEqual(result["provider_result"]["status"], "SUCCESS")
 
+    def test_terminal_success_with_empty_response_and_attached_error_normalizes_to_parse_error(self):
+        for empty_resp in ("", "   ", "\n\t  "):
+            with self.subTest(empty_resp=empty_resp):
+                raw = self.workspace / "empty_success_error.jsonl"
+                raw.write_text(json.dumps({
+                    "status": "SUCCESS",
+                    "response": empty_resp,
+                    "conversation_id": "agy-conv-with-err",
+                    "usage": {"input_tokens": 15, "output_tokens": 0},
+                    "model": "claude-sonnet-5-5-high",
+                    "error": {
+                        "type": "upstream_error",
+                        "message": "raw diagnostic message",
+                        "raw_trace": "secret_trace_key_7788",
+                    },
+                }))
+                outcome = rally_core.AgyAdapter().parse(raw, 0)
+                self.assertFalse(outcome.success)
+                self.assertEqual(outcome.error["type"], "parse_error")
+                self.assertEqual(outcome.error["message"], "AGY output contains no nonempty response")
+                self.assertEqual(outcome.session_id, "agy-conv-with-err")
+                self.assertEqual(outcome.usage, {"input_tokens": 15, "output_tokens": 0})
+                self.assertEqual(outcome.model, "claude-sonnet-5-5-high")
+                self.assertEqual(outcome.provider_result.get("status"), "SUCCESS")
+                self.assertNotIn("raw diagnostic message", outcome.error.get("message", ""))
+                self.assertNotIn("secret_trace_key_7788", json.dumps(outcome.error))
+                self.assertNotIn("secret_trace_key_7788", json.dumps(outcome.provider_result))
+
+    def test_empty_success_carrying_error_object_becomes_nonzero_parse_error_without_diagnostic_leak(self):
+        empty_payload = json.dumps({
+            "status": "SUCCESS",
+            "response": "   \n\t ",
+            "conversation_id": "conv-empty-durable-err",
+            "usage": {"tokens": 7},
+            "model": "sonnet",
+            "error": {
+                "type": "provider_crash",
+                "message": "raw diagnostic crash failure",
+                "diagnostic": "SECRET_DIAGNOSTIC_LEAK_998877",
+            },
+        })
+        completed = self.run_job(environment={"FAKE_AGY_OUTPUT": empty_payload, "FAKE_AGY_EXIT": "0"})
+        self.assertNotEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(completed.returncode, 1)
+        result = json.loads(completed.stdout)
+        self.assertEqual(result["status"], "ERROR")
+        self.assertEqual(result["exit_code"], 1)
+        self.assertEqual(result["error"]["type"], "parse_error")
+        self.assertEqual(result["error"]["message"], "AGY output contains no nonempty response")
+        self.assertEqual(result["session_id"], "conv-empty-durable-err")
+        self.assertEqual(result["usage"], {"tokens": 7})
+        self.assertEqual(result["model"], "sonnet")
+        self.assertEqual(result["provider_result"]["status"], "SUCCESS")
+        self.assertNotIn("SECRET_DIAGNOSTIC_LEAK_998877", completed.stdout)
+        self.assertNotIn("SECRET_DIAGNOSTIC_LEAK_998877", json.dumps(result))
+
     def test_bare_nonzero_exit_without_result_classifies_as_provider_exit(self):
         raw = self.workspace / "bare-exit.jsonl"
         raw.write_text("")

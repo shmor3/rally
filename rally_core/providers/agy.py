@@ -108,27 +108,29 @@ class AgyAdapter:
         success = exit_code == 0 and terminal["status"] == "SUCCESS" and has_nonempty_response
         error = None
         if not success:
-            provider_error = terminal.get("error")
-            if isinstance(provider_error, dict):
-                error = _base._public_error(provider_error)
-                classified = _base._classify_provider_failure("agy", json.dumps(error), exit_code)
-                if classified["type"] in ("quota_error", "auth_error"):
-                    error = {**error, "type": classified["type"], "message": error.get("message") or classified["message"]}
-                else:
-                    error = {**error, "type": "provider_error"}
-            elif terminal["status"] == "ERROR":
-                message = provider_error if isinstance(provider_error, str) else None
-                text_to_check = message or response or "AGY reported ERROR"
-                classified = _base._classify_provider_failure("agy", text_to_check, exit_code)
-                if classified["type"] in ("quota_error", "auth_error"):
-                    error = {"type": classified["type"], "message": _process._public_text(text_to_check) or classified["message"]}
-                else:
-                    error = {"type": "provider_error",
-                             "message": _process._public_text(text_to_check)}
-            elif terminal["status"] == "SUCCESS" and not has_nonempty_response:
+            if terminal["status"] == "SUCCESS" and not has_nonempty_response:
                 error = {"type": "parse_error", "message": "AGY output contains no nonempty response"}
+                terminal = {k: v for k, v in terminal.items() if k != "error"}
             else:
-                error = {"type": "provider_exit", "message": f"AGY exited with status {exit_code}"}
+                provider_error = terminal.get("error")
+                if isinstance(provider_error, dict):
+                    error = _base._public_error(provider_error)
+                    classified = _base._classify_provider_failure("agy", json.dumps(error), exit_code)
+                    if classified["type"] in ("quota_error", "auth_error"):
+                        error = {**error, "type": classified["type"], "message": error.get("message") or classified["message"]}
+                    else:
+                        error = {**error, "type": "provider_error"}
+                elif terminal["status"] == "ERROR":
+                    message = provider_error if isinstance(provider_error, str) else None
+                    text_to_check = message or response or "AGY reported ERROR"
+                    classified = _base._classify_provider_failure("agy", text_to_check, exit_code)
+                    if classified["type"] in ("quota_error", "auth_error"):
+                        error = {"type": classified["type"], "message": _process._public_text(text_to_check) or classified["message"]}
+                    else:
+                        error = {"type": "provider_error",
+                                 "message": _process._public_text(text_to_check)}
+                else:
+                    error = {"type": "provider_exit", "message": f"AGY exited with status {exit_code}"}
         usage = terminal.get("usage", {})
         if not isinstance(usage, dict):
             raise ValueError("AGY terminal usage must be an object")
