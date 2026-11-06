@@ -2171,12 +2171,12 @@ class AgentJobLifecycleTests(unittest.TestCase):
             "ANTHROPIC_API_KEY": "sk-ant-test-key-12345678",
             "OPENAI_API_KEY": "sk-proj-test-key-12345678",
             "GITHUB_TOKEN": "ghp_1234567890abcdefghijklmnopqrstuvwxyz",
-            "AWS_SECRET_ACCESS_KEY": "credential-sentinel-aws-secret",
-            "MY_PASSWORD": "secret_password_123",
-            "AUTH_HEADER": "Bearer my-secret-token",
-            "SESSION_COOKIE": "session=xyz123",
+            "AWS_SECRET_ACCESS_KEY": f"{CREDENTIAL_SENTINEL}-aws-secret",
+            "MY_PASSWORD": f"{CREDENTIAL_SENTINEL}-password",
+            "AUTH_HEADER": f"Bearer {CREDENTIAL_SENTINEL}",
+            "SESSION_COOKIE": f"session={CREDENTIAL_SENTINEL}",
             "UNLISTED_CUSTOM_CONFIG": "custom_value",
-            "FIXTURE_SECRET": "fixture_secret_val",
+            "FIXTURE_SECRET": f"{CREDENTIAL_SENTINEL}-fixture-val",
         }
         with mock.patch.dict(os.environ, sample_env), mock.patch.object(rally_core.subprocess, "run") as run:
             run.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
@@ -2204,7 +2204,7 @@ class AgentJobLifecycleTests(unittest.TestCase):
         self.assertNotIn("sk-ant", raw_json)
         self.assertNotIn("sk-proj", raw_json)
         self.assertNotIn("ghp_", raw_json)
-        self.assertNotIn("secret_password", raw_json)
+        self.assertNotIn(CREDENTIAL_SENTINEL, raw_json)
 
     def test_launchctl_corrupt_or_disallowed_keys_cleanup(self):
         with mock.patch.dict(os.environ, {"AGENT_JOB_LAUNCHER": "launchctl"}), mock.patch.object(self.manager, "_launch"):
