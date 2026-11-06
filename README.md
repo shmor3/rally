@@ -190,7 +190,7 @@ Each directory contains:
 - **Entrypoint Compatibility**: `./agent-job` is provided alongside `./rally` as an identical entrypoint shim for backwards compatibility.
 - **Environment Variables**:
   - `AGENT_JOB_DIR`: Overrides the transcript root directory (defaults to `<cwd>/.artifacts/agent-jobs`). When `--cwd` is used to target a separate workspace, followup/status/wait/read/stop/list must resolve the same store by running from that job workspace or setting the same absolute `AGENT_JOB_DIR` for every command.
-  - `AGENT_JOB_LAUNCHER`: Process supervision backend (`auto`, `launchctl`, or `detached`). `auto` selects macOS `launchctl` when available, falling back to detached POSIX sessions.
+  - `AGENT_JOB_LAUNCHER`: Process supervision backend (`auto`, `launchctl`, or `detached`). `auto` selects macOS `launchctl` when available, falling back to detached POSIX sessions. In `launchctl` mode, only a strict allowlist of non-secret execution/config variables necessary for provider CLI discovery and local configuration (e.g. `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, locale `LC_*`/`LANG`, XDG directories, `SSH_AUTH_SOCK`, TLS certificates and proxy settings) is persisted to a private `0600` file and consumed/removed before provider launch. Arbitrary environment credentials and secrets are not forwarded in `launchctl` mode; users requiring arbitrary environment credential forwarding may select detached mode (`AGENT_JOB_LAUNCHER=detached`).
   - `AGENT_JOB_LAUNCHCTL`: Custom path to `launchctl` binary when using `launchctl` supervision.
 
 ## Development and Testing

@@ -1183,6 +1183,19 @@ class AgentJobDoctorTests(unittest.TestCase):
         )
         self.assertNotIn("./rally codex start --effort low --cwd /path/to/workspace --prompt 'Analyze benchmarks.'\n\n# Run a blocking job with Claude\n./rally claude run --model haiku --effort low --prompt 'Format markdown.'\n\n# Wait for a background job to finish\n./rally wait", readme_text)
 
+    def test_launchctl_persistence_documentation_contract(self):
+        help_text = rally_core.model.HELP_TEXT
+        readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
+
+        # Verify launchctl allowlist and credential omission documented in HELP_TEXT
+        self.assertIn("launchctl mode persists only allowlisted non-secret config variables", help_text)
+        self.assertIn("arbitrary environment credentials are not forwarded (use detached mode)", help_text)
+
+        # Verify launchctl allowlist and credential omission documented in README
+        self.assertIn("only a strict allowlist of non-secret execution/config variables", readme_text)
+        normalized_readme = " ".join(readme_text.replace("`", "").split())
+        self.assertIn("Arbitrary environment credentials and secrets are not forwarded in launchctl mode; users requiring arbitrary environment credential forwarding may select detached mode", normalized_readme)
+
     def test_durable_store_cwd_executable_resolution_contract(self):
         with tempfile.TemporaryDirectory() as client_dir, tempfile.TemporaryDirectory() as workspace_dir:
             client_path = Path(client_dir).resolve()
@@ -2073,13 +2086,23 @@ class AgentJobLifecycleTests(unittest.TestCase):
         self.assertEqual(command[command.index("--_worker") + 1:][:2], [str(self.store.root), job_id])
 
     def test_launchctl_environment_is_private_token_checked_and_consumed_before_provider(self):
-        with mock.patch.dict(os.environ, {"AGENT_JOB_LAUNCHER": "launchctl", "FIXTURE_RESPONSE": "caller response", "FIXTURE_SECRET": "private environment value"}), mock.patch.object(rally_core.subprocess, "run") as run:
+        with mock.patch.dict(os.environ, {
+            "AGENT_JOB_LAUNCHER": "launchctl",
+            "LC_ALL": "en_US.UTF-8",
+            "XDG_CONFIG_HOME": "/custom/xdg",
+            "FIXTURE_SECRET": "private environment value",
+        }), mock.patch.object(rally_core.subprocess, "run") as run:
             run.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
             job_id = self.manager.start(self.request())["job_id"]
         job = self.store.get(job_id)
         environment_file = job.directory / "launch-environment.json"
         self.assertTrue(environment_file.exists())
         self.assertEqual(environment_file.stat().st_mode & 0o777, 0o600)
+        env_data = json.loads(environment_file.read_text())
+        self.assertIn("LC_ALL", env_data)
+        self.assertEqual(env_data["LC_ALL"], "en_US.UTF-8")
+        self.assertIn("XDG_CONFIG_HOME", env_data)
+        self.assertNotIn("FIXTURE_SECRET", env_data)
         self.assertNotIn("private environment value", json.dumps(run.call_args.args[0]))
         token = json.loads((job.directory / "worker.json").read_text())["token"]
         adapter = FixtureAdapter()
@@ -2087,17 +2110,100 @@ class AgentJobLifecycleTests(unittest.TestCase):
 
         def build(request):
             self.assertFalse(environment_file.exists())
-            self.assertEqual(os.environ["FIXTURE_SECRET"], "private environment value")
+            self.assertEqual(os.environ.get("LC_ALL"), "en_US.UTF-8")
+            self.assertNotIn("FIXTURE_SECRET", os.environ)
             return original_build(request)
 
         with mock.patch.dict(os.environ, {}, clear=True):
             self.assertEqual(rally_core.worker_main(self.store.root, job_id, "wrong", adapters={"_fixture": adapter}), 2)
             self.assertTrue(environment_file.exists())
-            self.assertNotIn("FIXTURE_SECRET", os.environ)
+            self.assertNotIn("LC_ALL", os.environ)
             with mock.patch.object(adapter, "build_command", side_effect=build):
                 self.assertEqual(rally_core.worker_main(self.store.root, job_id, token, adapters={"_fixture": adapter}), 0)
-        self.assertEqual(self.manager.read(job_id), "caller response")
         self.assertNotIn("private environment value", json.dumps(self.manager.wait(job_id)))
+
+    def test_launchctl_environment_persists_only_allowlist_and_excludes_credentials(self):
+        sample_env = {
+            "AGENT_JOB_LAUNCHER": "launchctl",
+            "PATH": "/usr/bin:/bin",
+            "HOME": "/Users/testuser",
+            "USER": "testuser",
+            "LOGNAME": "testuser",
+            "SHELL": "/bin/zsh",
+            "TMPDIR": "/tmp/test",
+            "LANG": "C.UTF-8",
+            "LC_ALL": "en_US.UTF-8",
+            "LC_CTYPE": "UTF-8",
+            "XDG_CONFIG_HOME": "/Users/testuser/.config",
+            "SSH_AUTH_SOCK": "/private/tmp/ssh-sock",
+            "SSL_CERT_FILE": "/etc/ssl/cert.pem",
+            "HTTPS_PROXY": "http://127.0.0.1:8080",
+            # Credential-shaped and arbitrary variables (must be excluded)
+            "ANTHROPIC_API_KEY": "sk-ant-test-key-12345678",
+            "OPENAI_API_KEY": "sk-proj-test-key-12345678",
+            "GITHUB_TOKEN": "ghp_1234567890abcdefghijklmnopqrstuvwxyz",
+            "AWS_SECRET_ACCESS_KEY": "credential-sentinel-aws-secret",
+            "MY_PASSWORD": "secret_password_123",
+            "AUTH_HEADER": "Bearer my-secret-token",
+            "SESSION_COOKIE": "session=xyz123",
+            "UNLISTED_CUSTOM_CONFIG": "custom_value",
+            "FIXTURE_SECRET": "fixture_secret_val",
+        }
+        with mock.patch.dict(os.environ, sample_env), mock.patch.object(rally_core.subprocess, "run") as run:
+            run.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+            job_id = self.manager.start(self.request())["job_id"]
+        job = self.store.get(job_id)
+        path = job.directory / "launch-environment.json"
+        self.assertTrue(path.exists())
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        persisted = json.loads(path.read_text())
+
+        # Allowlisted execution/config variables present
+        for key in ("PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "LANG",
+                    "LC_ALL", "LC_CTYPE", "XDG_CONFIG_HOME", "SSH_AUTH_SOCK",
+                    "SSL_CERT_FILE", "HTTPS_PROXY"):
+            self.assertIn(key, persisted, f"Expected allowlisted variable {key} in launch environment")
+            self.assertEqual(persisted[key], sample_env[key])
+
+        # Credential-shaped and arbitrary variables absent
+        for key in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GITHUB_TOKEN", "AWS_SECRET_ACCESS_KEY",
+                    "MY_PASSWORD", "AUTH_HEADER", "SESSION_COOKIE", "UNLISTED_CUSTOM_CONFIG", "FIXTURE_SECRET"):
+            self.assertNotIn(key, persisted, f"Disallowed variable {key} must not be persisted")
+
+        # No credential values leaked in raw persisted json
+        raw_json = path.read_text()
+        self.assertNotIn("sk-ant", raw_json)
+        self.assertNotIn("sk-proj", raw_json)
+        self.assertNotIn("ghp_", raw_json)
+        self.assertNotIn("secret_password", raw_json)
+
+    def test_launchctl_corrupt_or_disallowed_keys_cleanup(self):
+        with mock.patch.dict(os.environ, {"AGENT_JOB_LAUNCHER": "launchctl"}), mock.patch.object(self.manager, "_launch"):
+            job_id = self.manager.start(self.request())["job_id"]
+        job = self.store.get(job_id)
+        path = job.directory / "launch-environment.json"
+        self.assertTrue(path.exists())
+
+        # Overwrite with disallowed key injected
+        path.write_text(json.dumps({"DISALLOWED_KEY": "injected_val"}))
+        token = json.loads((job.directory / "worker.json").read_text())["token"]
+
+        # Worker rejects disallowed key, cleans up file, and records worker_error
+        code = rally_core.worker_main(self.store.root, job_id, token, adapters={"_fixture": FixtureAdapter()})
+        self.assertEqual(code, 1)
+        self.assertFalse(path.exists(), "Corrupt/invalid launch-environment.json must be removed")
+        status = self.manager.status(job_id)
+        self.assertEqual(status["status"], "ERROR")
+
+    def test_detached_mode_has_no_environment_disk_persistence(self):
+        with mock.patch.dict(os.environ, {"AGENT_JOB_LAUNCHER": "detached", "CUSTOM_VAR": "val"}), \
+             mock.patch.object(rally_core.subprocess, "Popen") as popen:
+            proc = mock.MagicMock()
+            proc.pid = 12345
+            popen.return_value = proc
+            job_id = self.manager.start(self.request())["job_id"]
+        job = self.store.get(job_id)
+        self.assertFalse((job.directory / "launch-environment.json").exists())
 
     def test_stale_starting_recovery_removes_unconsumed_launch_environment(self):
         with mock.patch.dict(os.environ, {"AGENT_JOB_LAUNCHER": "launchctl"}), mock.patch.object(self.manager, "_launch"):

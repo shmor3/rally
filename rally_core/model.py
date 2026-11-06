@@ -97,6 +97,8 @@ Environment and portability:
   AGENT_JOB_DIR overrides transcript root (relative to caller cwd).
   AGENT_JOB_LAUNCHER=auto|launchctl|detached; auto uses launchctl on macOS and
   detached sessions elsewhere. AGENT_JOB_LAUNCHCTL overrides launchctl executable.
+  launchctl mode persists only allowlisted non-secret config variables to private
+  storage; arbitrary environment credentials are not forwarded (use detached mode).
   Provider executables and credentials use normal PATH/provider configuration.
   Compatibility shim ./agent-job preserves legacy entrypoint compatibility.
 

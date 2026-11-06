@@ -279,6 +279,93 @@ def _job_lock(job: Job):
         os.close(fd)
 
 
+LAUNCHCTL_ENV_EXACT_ALLOWLIST = frozenset({
+    "PATH",
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "SHELL",
+    "TMPDIR",
+    "TERM",
+    "LANG",
+    "SSH_AUTH_SOCK",
+    # XDG base directories
+    "XDG_CONFIG_HOME",
+    "XDG_CACHE_HOME",
+    "XDG_DATA_HOME",
+    "XDG_STATE_HOME",
+    "XDG_RUNTIME_DIR",
+    "XDG_CONFIG_DIRS",
+    "XDG_DATA_DIRS",
+    # TLS certificates & Proxies
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "REQUESTS_CA_BUNDLE",
+    "CURL_CA_BUNDLE",
+    "NODE_EXTRA_CA_CERTS",
+    "GIT_SSL_CAINFO",
+    "GIT_SSL_CAPATH",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "NO_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "no_proxy",
+    # Python environment
+    "PYTHONPATH",
+    "PYTHONHOME",
+    "VIRTUAL_ENV",
+    # Test fixture harness
+    "AGENT_JOB_TEST_FIXTURE_EXECUTABLE",
+})
+
+_LC_VAR_PATTERN = re.compile(r"^LC_[A-Z0-9_]+$")
+_DISALLOWED_NAME_KEYWORDS = (
+    "KEY",
+    "TOKEN",
+    "SECRET",
+    "PASSWORD",
+    "PASSWD",
+    "AUTH",
+    "COOKIE",
+    "CREDENTIAL",
+    "BEARER",
+    "PRIVATE",
+)
+_DISALLOWED_NAME_PREFIXES = (
+    "ANTHROPIC_",
+    "OPENAI_",
+    "GEMINI_",
+    "COPILOT_",
+    "AWS_",
+    "AZURE_",
+    "GH_",
+    "GITHUB_",
+)
+
+
+def _is_launchctl_allowlisted_variable(key: str, value: str) -> bool:
+    if not isinstance(key, str) or not isinstance(value, str):
+        return False
+    if not key or "=" in key or "\0" in key or "\0" in value:
+        return False
+    upper_key = key.upper()
+    is_allowed = (key in LAUNCHCTL_ENV_EXACT_ALLOWLIST or bool(_LC_VAR_PATTERN.match(upper_key)))
+    if not is_allowed:
+        return False
+    if key not in LAUNCHCTL_ENV_EXACT_ALLOWLIST:
+        if any(keyword in upper_key for keyword in _DISALLOWED_NAME_KEYWORDS):
+            return False
+    if upper_key.startswith(_DISALLOWED_NAME_PREFIXES):
+        return False
+    for pattern in _CREDENTIAL_PATTERNS:
+        if pattern.search(value):
+            return False
+    return True
+
+
 def _remove_launch_environment(job: Job) -> None:
     path = job.launch_env
     try:
@@ -298,12 +385,23 @@ def _restore_launch_environment(job: Job) -> None:
         return
     try:
         environment = _read_json(path)
-        if any(not key or "=" in key or "\0" in key or not isinstance(value, str) or "\0" in value
-               for key, value in environment.items()):
+        if not isinstance(environment, dict):
             raise ValueError("invalid launch environment")
+        for key, value in environment.items():
+            if not _is_launchctl_allowlisted_variable(key, value):
+                raise ValueError("disallowed variable in launch environment")
         os.environ.update(environment)
     finally:
         _remove_launch_environment(job)
+
+
+def _launchctl_persisted_env(base_env: Mapping[str, str] | None = None) -> dict[str, str]:
+    raw_env = _worker_env(base_env)
+    persisted = {}
+    for key, value in raw_env.items():
+        if _is_launchctl_allowlisted_variable(key, value):
+            persisted[key] = value
+    return persisted
 
 
 def _worker_env(base_env: Mapping[str, str] | None = None) -> dict[str, str]:
@@ -459,7 +557,7 @@ class JobManager:
         for name in ("stdout.jsonl", "stderr.log", "manager.stdout.log", "manager.stderr.log"):
             atomic_write(job.directory / name, "")
         if launcher == "launchctl":
-            atomic_write(job.directory / "launch-environment.json", _json_text(_worker_env()))
+            atomic_write(job.directory / "launch-environment.json", _json_text(_launchctl_persisted_env()))
         try:
             self._launch(job, token)
         except (OSError, ValueError, subprocess.SubprocessError) as error:
