@@ -46,6 +46,89 @@ class RallyIdentityTests(unittest.TestCase):
         self.assertEqual(primary.stdout, compat.stdout)
 
 
+def parse_simple_yaml(text: str):
+    """Parse lightweight YAML workflow files without third-party dependencies."""
+    lines = text.splitlines()
+
+    def get_indent(line: str) -> int:
+        return len(line) - len(line.lstrip(" "))
+
+    def parse_value(val: str):
+        val = val.strip()
+        if val.startswith("[") and val.endswith("]"):
+            return [parse_value(x) for x in val[1:-1].split(",") if x.strip()]
+        if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
+            return val[1:-1]
+        if val.lower() == "true":
+            return True
+        if val.lower() == "false":
+            return False
+        return val
+
+    i = 0
+
+    def parse_block(indent: int):
+        nonlocal i
+        block_dict = {}
+        block_list = []
+        is_list = False
+
+        while i < len(lines):
+            line = lines[i]
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                i += 1
+                continue
+            cur_indent = get_indent(line)
+            if cur_indent < indent:
+                break
+
+            if stripped.startswith("- "):
+                is_list = True
+                item_content = stripped[2:].strip()
+                if ":" in item_content and not item_content.startswith("http"):
+                    k, v = item_content.split(":", 1)
+                    k = k.strip()
+                    v = v.strip()
+                    i += 1
+                    sub = parse_block(cur_indent + 2)
+                    if isinstance(sub, dict):
+                        if v:
+                            sub[k] = parse_value(v)
+                    block_list.append(sub)
+                else:
+                    i += 1
+                    block_list.append(parse_value(item_content))
+            elif ":" in stripped:
+                k, v = stripped.split(":", 1)
+                k = k.strip()
+                v = v.strip()
+                i += 1
+                if v == "|":
+                    pipe_lines = []
+                    while i < len(lines):
+                        next_line = lines[i]
+                        if not next_line.strip():
+                            pipe_lines.append("")
+                            i += 1
+                            continue
+                        next_indent = get_indent(next_line)
+                        if next_indent <= cur_indent:
+                            break
+                        pipe_lines.append(next_line[cur_indent + 2:])
+                        i += 1
+                    block_dict[k] = "\n".join(pipe_lines).strip()
+                elif v == "":
+                    block_dict[k] = parse_block(cur_indent + 2)
+                else:
+                    block_dict[k] = parse_value(v)
+            else:
+                i += 1
+        return block_list if is_list else block_dict
+
+    return parse_block(0)
+
+
 class RallyRepositoryTests(unittest.TestCase):
     def test_repository_has_no_nomiru_runtime_dependency(self):
         forbidden = ("tools/" + "agent_job", "agy_" + "nomiru.sh", "NOMIRU" + "_AGY_")
@@ -128,6 +211,7 @@ class RallyRepositoryTests(unittest.TestCase):
             "LICENSE",
             "CONTRIBUTING.md",
             "SECURITY.md",
+            ".github/workflows/ci.yml",
             "tests/fixtures/rally/current-help-contract.json",
             "tests/fixtures/rally/README.md",
             "tests/fixtures/rally/codex-0.164.0-success.jsonl",
@@ -225,6 +309,79 @@ class RallyRepositoryTests(unittest.TestCase):
         self.assertIn("rally claude run", help_text)
         self.assertIn("rally wait JOB_ID", help_text)
         self.assertIn("rally followup JOB_ID", help_text)
+
+    def test_continuous_integration_workflow_contract(self):
+        ci_path = ROOT / ".github" / "workflows" / "ci.yml"
+        self.assertTrue(ci_path.is_file(), "CI workflow file .github/workflows/ci.yml must exist")
+        raw_text = ci_path.read_text(encoding="utf-8")
+
+        # Absences of forbidden / dangerous constructs
+        forbidden = ("r" + "tk").lower()
+        self.assertNotIn(forbidden, raw_text.lower(), "Workflow must not mention forbidden wrapper token")
+        self.assertNotIn("secrets.", raw_text.lower(), "Workflow must not reference GitHub secrets")
+        self.assertNotIn("write", raw_text.lower(), "Workflow must not grant or request write permissions")
+        for cred in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "COPILOT_", "AWS_", "AZURE_"):
+            self.assertNotIn(cred, raw_text, f"Workflow must not reference provider credential {cred}")
+        for tool in ("@anthropic-ai", "@github/copilot", "gemini-cli"):
+            self.assertNotIn(tool, raw_text.lower(), f"Workflow must not install provider CLI {tool}")
+        for pub in ("twine", "pypi", "gh release", "publish"):
+            self.assertNotIn(pub, raw_text.lower(), f"Workflow must not publish or release packages ({pub})")
+        self.assertNotIn("upload-artifact", raw_text, "Workflow must not upload artifacts")
+        self.assertNotIn("download-artifact", raw_text, "Workflow must not download artifacts")
+
+        parsed = parse_simple_yaml(raw_text)
+        self.assertEqual(parsed.get("name"), "CI")
+
+        # Triggers
+        triggers = parsed.get("on", {})
+        self.assertIn("push", triggers)
+        self.assertIn("pull_request", triggers)
+        self.assertEqual(triggers["push"].get("branches"), ["main"])
+        self.assertEqual(triggers["pull_request"].get("branches"), ["main"])
+        self.assertEqual(set(triggers.keys()), {"push", "pull_request"})
+
+        # Top-level permissions
+        self.assertEqual(parsed.get("permissions"), {"contents": "read"})
+
+        # Concurrency
+        concurrency = parsed.get("concurrency", {})
+        self.assertEqual(concurrency.get("group"), "${{ github.workflow }}-${{ github.ref }}")
+        self.assertEqual(concurrency.get("cancel-in-progress"), True)
+
+        # Jobs and matrix
+        jobs = parsed.get("jobs", {})
+        self.assertEqual(list(jobs.keys()), ["test"])
+        test_job = jobs["test"]
+        self.assertEqual(test_job.get("runs-on"), "ubuntu-latest")
+        strategy = test_job.get("strategy", {})
+        self.assertEqual(strategy.get("fail-fast"), False)
+        matrix = strategy.get("matrix", {})
+        self.assertEqual(matrix.get("python-version"), ["3.9", "3.12", "3.15"])
+
+        # Steps
+        steps = test_job.get("steps", [])
+        self.assertTrue(len(steps) >= 5, "Workflow must contain required step pipeline")
+
+        # Third-party actions bounded strictly to checkout and setup-python
+        uses_actions = [s["uses"] for s in steps if "uses" in s]
+        self.assertEqual(uses_actions, ["actions/checkout@v4", "actions/setup-python@v5"])
+
+        setup_step = next(s for s in steps if s.get("uses") == "actions/setup-python@v5")
+        self.assertEqual(setup_step.get("with", {}).get("python-version"), "${{ matrix.python-version }}")
+
+        all_runs = "\n".join(s.get("run", "") for s in steps)
+        self.assertIn("pip install --upgrade", all_runs)
+        self.assertIn("pip install .", all_runs)
+        self.assertIn("python -m unittest tests.test_rally", all_runs)
+        self.assertIn("python -m py_compile", all_runs)
+        self.assertIn("rally", all_runs)
+        self.assertIn("agent-job", all_runs)
+        self.assertIn("rally_core", all_runs)
+        self.assertIn("./rally --help", all_runs)
+        self.assertIn("./agent-job --help", all_runs)
+        self.assertIn("rally --help", all_runs)
+        self.assertIn("RallyRepositoryTests", all_runs)
+        self.assertIn("AgentJobPrivacyRegressionTests", all_runs)
 
 
 def parse_provider_fixture(case, provider, name, exit_code=0):
