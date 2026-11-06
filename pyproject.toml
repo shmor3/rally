@@ -6,8 +6,42 @@ build-backend = "setuptools.build_meta"
 name = "rally-agent"
 version = "0.1.0"
 description = "Durable multi-provider agent job runner"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "shmor3" }]
 requires-python = ">=3.9"
 dependencies = []
+keywords = [
+    "agents",
+    "ai",
+    "cli",
+    "orchestration",
+    "runner",
+    "codex",
+    "claude",
+    "copilot",
+    "antigravity",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Build Tools",
+]
+
+[project.urls]
+Repository = "https://github.com/shmor3/rally"
+Issues = "https://github.com/shmor3/rally/issues"
+Documentation = "https://github.com/shmor3/rally#readme"
 
 [project.scripts]
 rally = "rally_core.cli:main"

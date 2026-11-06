@@ -74,13 +74,13 @@ Storage and result schema:
   error, cwd, transcript_dir, created_at, started_at, finished_at, source_job_id,
   provider_result. Provider semantic failures override zero process exits.
 
-Providers and examples (one caller-owned RTK boundary):
-  rtk rally agy run --model flash --effort high --prompt 'Review changes.'
-  rtk rally copilot start --model auto --max-credits 30 --prompt-file task.txt
-  rtk rally codex start --effort low --cwd /absolute/project --prompt 'Review.'
-  rtk rally claude run --model haiku --effort low --prompt 'Review changes.'
-  rtk rally wait JOB_ID
-  rtk rally followup JOB_ID --prompt 'Check another case.'
+Providers and examples:
+  rally agy run --model flash --effort high --prompt 'Review changes.'
+  rally copilot start --model auto --max-credits 30 --prompt-file task.txt
+  rally codex start --effort low --cwd /absolute/project --prompt 'Review.'
+  rally claude run --model haiku --effort low --prompt 'Review changes.'
+  rally wait JOB_ID
+  rally followup JOB_ID --prompt 'Check another case.'
   AGY defaults: sonnet alias and high effort; flash alias also supported.
   AGY selectors: --project ID and --conversation ID may coexist; --new-project
   conflicts with either. --session resumes a provider conversation/thread.

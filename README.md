@@ -1,20 +1,15 @@
 # Rally
 
-Rally is a lightweight, durable multi-provider agent job runner. It provides a uniform CLI and robust lifecycle management across multiple coding agent backends.
+Rally is a lightweight, durable multi-provider agent job runner. It provides a uniform CLI and robust lifecycle management across multiple coding agent backends (AGY, Copilot, Codex, and Claude).
 
 ## Key Features
 
 - **Standard Library Only**: Requires Python 3.9+ with zero external runtime dependencies.
-- **Install-Free**: Executable directly from checkout via `./rally` or `/path/to/rally`.
+- **Install-Free**: Executable directly from checkout via `./rally` or `/path/to/rally`, or installable via `pip`.
 - **Multi-Provider Support**: Unified lifecycle for AGY, GitHub Copilot CLI, OpenAI Codex CLI, and Anthropic Claude Code.
 - **Durable Lifecycle**: Detached background execution, quiet wait (internally bounded polling without chatter), crash recovery, and resumable follow-up sessions.
 - **Clean Result Schema**: Normalized JSON output with truncated payloads and sanitized public errors.
 - **Backward Compatibility**: Preserves generic `agent-job` invocation and `AGENT_JOB_*` environment configuration.
-
-## Requirements
-
-- Python >= 3.9 (standard library only; no virtual environment or external packages required).
-- Provider CLI tools installed on `PATH` for providers you intend to run.
 
 ## Security and Permission Policy
 
@@ -27,43 +22,69 @@ Rally is a lightweight, durable multi-provider agent job runner. It provides a u
 >
 > These flags grant broader machine access than `--cwd` or `--add-dir`. Every prompt must be treated as full code-execution authority.
 
-## Quick Start (Using RTK)
+## Requirements
 
-Execute jobs directly using the caller-owned RTK boundary:
+- Python >= 3.9 (standard library only; no virtual environment or external packages required).
+- Provider CLI tools installed on `PATH` for providers you intend to run (`agy`, `copilot`, `codex`, `claude`).
+
+## Setup and Installation
+
+### Direct Checkout (No Installation Required)
+
+Rally can be run directly from any git checkout:
+
+```bash
+git clone https://github.com/shmor3/rally.git
+cd rally
+./rally --help
+```
+
+### Local Installation
+
+You can optionally install Rally as a command-line tool into your current environment:
+
+```bash
+pip install -e .
+rally --help
+```
+
+## Quick Start
+
+Execute jobs directly using `./rally` (or installed `rally`):
 
 ```bash
 # Check provider readiness
-rtk ./rally doctor
+./rally doctor
 
 # Run a blocking job with AGY
-rtk ./rally agy run --model flash --effort high --prompt 'Review git status.'
+./rally agy run --model flash --effort high --prompt 'Review git status.'
 
 # Start a background job with Copilot
-rtk ./rally copilot start --model auto --max-credits 30 --prompt-file task.txt
+./rally copilot start --model auto --max-credits 30 --prompt-file task.txt
 
 # Start a background job with Codex in a specific workspace
-rtk ./rally codex start --effort low --cwd /path/to/workspace --prompt 'Analyze benchmarks.'
+./rally codex start --effort low --cwd /path/to/workspace --prompt 'Analyze benchmarks.'
 
 # Run a blocking job with Claude
-rtk ./rally claude run --model haiku --effort low --prompt 'Format markdown.'
+./rally claude run --model haiku --effort low --prompt 'Format markdown.'
 
 # Wait for a background job to finish
-rtk ./rally wait 20261105T190000Z-0123456789ab
+./rally wait 20261105T190000Z-0123456789ab
 
 # Check status of an existing job
-rtk ./rally status 20261105T190000Z-0123456789ab
+./rally status 20261105T190000Z-0123456789ab
 
 # Read the final assistant response text
-rtk ./rally read 20261105T190000Z-0123456789ab
+./rally read 20261105T190000Z-0123456789ab
 
 # Start a follow-up session from a completed job
-rtk ./rally followup 20261105T190000Z-0123456789ab --prompt 'Address reviewer feedback.'
+./rally followup 20261105T190000Z-0123456789ab --prompt 'Address reviewer feedback.'
 
 # Terminate a running job
-rtk ./rally stop 20261105T190000Z-0123456789ab
+./rally stop 20261105T190000Z-0123456789ab
 
 # List recent jobs
-rtk ./rally list
+./rally list
 ```
 
 ## Supported Providers
@@ -170,17 +191,23 @@ Each directory contains:
   - `AGENT_JOB_LAUNCHER`: Process supervision backend (`auto`, `launchctl`, or `detached`). `auto` selects macOS `launchctl` when available, falling back to detached POSIX sessions.
   - `AGENT_JOB_LAUNCHCTL`: Custom path to `launchctl` binary when using `launchctl` supervision.
 
-## Running Tests
+## Development and Testing
 
 Tests run using Python's standard `unittest` framework:
 
 ```bash
 # Run focused repository and metadata tests
-rtk /usr/bin/python3 -m unittest tests.test_rally.RallyRepositoryTests
+python3 -m unittest tests.test_rally.RallyRepositoryTests
 
 # Run privacy regression tests
-rtk /usr/bin/python3 -m unittest tests.test_rally.AgentJobPrivacyRegressionTests
+python3 -m unittest tests.test_rally.AgentJobPrivacyRegressionTests
 
 # Run full test suite
-rtk /usr/bin/python3 -m unittest discover tests
+python3 -m unittest discover tests
 ```
+
+## Contributing, Security, and License
+
+- **Contributing**: Please review [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on code style, testing, and pull requests.
+- **Security Policy**: See [SECURITY.md](SECURITY.md) for details on vulnerability reporting via GitHub Private Vulnerability Reporting and warnings regarding sensitive transcript disclosures.
+- **License**: Rally is open-source software licensed under the [MIT License](LICENSE). Copyright (c) 2026 shmor3.

@@ -78,12 +78,116 @@ class RallyRepositoryTests(unittest.TestCase):
         metadata = pyproject_path.read_text()
         self.assertIn('requires-python = ">=3.9"', metadata)
         self.assertIn("dependencies = []", metadata)
-        self.assertNotIn("license", metadata.lower())
+        self.assertIn('license = { file = "LICENSE" }', metadata)
         self.assertIn('packages = ["rally_core", "rally_core.providers"]', metadata)
+        self.assertIn('authors = [{ name = "shmor3" }]', metadata)
+        self.assertIn('readme = "README.md"', metadata)
+        self.assertIn("https://github.com/shmor3/rally", metadata)
+
+    def test_project_metadata_parses_cleanly(self):
+        try:
+            import tomllib
+        except ImportError:
+            try:
+                import tomli as tomllib
+            except ImportError:
+                tomllib = None
+        if tomllib is not None:
+            data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+            self.assertEqual(data["project"]["name"], "rally-agent")
+            self.assertEqual(data["project"]["requires-python"], ">=3.9")
+            self.assertEqual(data["project"]["dependencies"], [])
+            self.assertEqual(data["project"]["authors"], [{"name": "shmor3"}])
+            self.assertEqual(data["project"]["license"], {"file": "LICENSE"})
+            self.assertEqual(data["project"]["readme"], "README.md")
+            self.assertEqual(data["project"]["scripts"]["rally"], "rally_core.cli:main")
+            self.assertEqual(data["tool"]["setuptools"]["packages"], ["rally_core", "rally_core.providers"])
+            self.assertIn("Repository", data["project"]["urls"])
+            self.assertIn("Issues", data["project"]["urls"])
+            self.assertIn("Documentation", data["project"]["urls"])
 
     def test_standalone_documentation_exists(self):
         self.assertTrue((ROOT / "README.md").is_file())
         self.assertTrue((ROOT / "docs" / "architecture.md").is_file())
+
+    def test_tracked_public_surfaces_contain_no_rtk(self):
+        public_files = [
+            ROOT / "README.md",
+            ROOT / "docs" / "architecture.md",
+            ROOT / "pyproject.toml",
+            ROOT / "LICENSE",
+            ROOT / "CONTRIBUTING.md",
+            ROOT / "SECURITY.md",
+            ROOT / "tests" / "fixtures" / "rally" / "current-help-contract.json",
+        ]
+        for path in public_files:
+            self.assertTrue(path.is_file(), f"Public surface {path.name} must exist")
+            content = path.read_text(encoding="utf-8")
+            self.assertNotIn("rtk", content.lower(), f"Tracked public file {path.name} contains RTK reference")
+        self.assertNotIn("rtk", rally_core.model.HELP_TEXT.lower(), "CLI HELP_TEXT contains RTK reference")
+
+    def test_readme_structure_and_direct_commands(self):
+        readme_path = ROOT / "README.md"
+        self.assertTrue(readme_path.is_file())
+        text = readme_path.read_text(encoding="utf-8")
+        self.assertNotIn("rtk", text.lower(), "README must not contain RTK")
+        self.assertIn("./rally", text, "README must document direct checkout execution via ./rally")
+        self.assertIn("rally", text, "README must document installed rally command")
+        self.assertIn("LICENSE", text, "README must link to LICENSE")
+        self.assertIn("CONTRIBUTING.md", text, "README must link to CONTRIBUTING.md")
+        self.assertIn("SECURITY.md", text, "README must link to SECURITY.md")
+        sections = [
+            "Rally",
+            "Security and Permission Policy",
+            "Requirements",
+            "Setup and Installation",
+            "Quick Start",
+            "Supported Providers",
+            "Command Reference",
+            "Result Schema (Version 1)",
+            "Transcript Storage and Privacy",
+            "Compatibility and Portability",
+            "Development and Testing",
+            "Contributing, Security, and License",
+        ]
+        indices = [text.index(heading) for heading in sections]
+        self.assertEqual(indices, sorted(indices), f"README sections must appear in first-user order: {sections}")
+
+    def test_mit_license_file(self):
+        license_path = ROOT / "LICENSE"
+        self.assertTrue(license_path.is_file(), "LICENSE file must exist")
+        text = license_path.read_text(encoding="utf-8")
+        self.assertIn("MIT License", text)
+        self.assertIn("Copyright (c) 2026 shmor3", text)
+        self.assertIn("Permission is hereby granted, free of charge", text)
+
+    def test_contributing_and_security_policies(self):
+        contrib_path = ROOT / "CONTRIBUTING.md"
+        self.assertTrue(contrib_path.is_file(), "CONTRIBUTING.md must exist")
+        contrib_text = contrib_path.read_text(encoding="utf-8")
+        self.assertNotIn("rtk", contrib_text.lower())
+        self.assertIn("Python", contrib_text)
+        self.assertIn("unittest", contrib_text)
+        self.assertIn("SECURITY.md", contrib_text)
+
+        sec_path = ROOT / "SECURITY.md"
+        self.assertTrue(sec_path.is_file(), "SECURITY.md must exist")
+        sec_text = sec_path.read_text(encoding="utf-8")
+        self.assertNotIn("rtk", sec_text.lower())
+        self.assertIn("private vulnerability reporting", sec_text.lower())
+        self.assertIn("transcript", sec_text.lower())
+        self.assertIn("credential", sec_text.lower())
+
+    def test_cli_help_examples_use_direct_commands(self):
+        help_text = rally_core.model.HELP_TEXT
+        self.assertNotIn("rtk", help_text.lower(), "HELP_TEXT must not mention RTK")
+        self.assertIn("Providers and examples:", help_text)
+        self.assertIn("rally agy run", help_text)
+        self.assertIn("rally copilot start", help_text)
+        self.assertIn("rally codex start", help_text)
+        self.assertIn("rally claude run", help_text)
+        self.assertIn("rally wait JOB_ID", help_text)
+        self.assertIn("rally followup JOB_ID", help_text)
 
 
 def parse_provider_fixture(case, provider, name, exit_code=0):
@@ -861,6 +965,11 @@ class AgentJobDoctorTests(unittest.TestCase):
             self.assertTrue(entry["bypass_flags"])
             self.assertIn("new", entry["modes"])
             self.assertIn("resume", entry["modes"])
+            example = entry.get("example")
+            self.assertIsNotNone(example, f"Provider {provider} must specify a help contract example")
+            self.assertNotIn("rtk", example.lower())
+            self.assertTrue(example.startswith(f"rally {provider}"), f"Example must start with 'rally {provider}'")
+            self.assertIn(example, rally_core.model.HELP_TEXT, f"Example {example} must be present in HELP_TEXT")
 
 
 class FixtureAdapter:
