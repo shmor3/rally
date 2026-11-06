@@ -48,6 +48,7 @@ Documentation = "https://github.com/shmor3/rally#readme"
 
 [project.scripts]
 rally = "rally_core.cli:main"
+agent-job = "rally_core.cli:main"
 
 [tool.setuptools]
 packages = ["rally_core", "rally_core.providers"]

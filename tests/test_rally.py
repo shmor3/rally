@@ -72,6 +72,7 @@ class RallyRepositoryTests(unittest.TestCase):
     def test_project_metadata_exposes_rally_script(self):
         metadata = (ROOT / "pyproject.toml").read_text()
         self.assertIn('rally = "rally_core.cli:main"', metadata)
+        self.assertIn('agent-job = "rally_core.cli:main"', metadata)
 
     def test_project_metadata_packaging_and_license_boundaries(self):
         pyproject_path = ROOT / "pyproject.toml"
@@ -107,7 +108,10 @@ class RallyRepositoryTests(unittest.TestCase):
             self.assertEqual(data["project"]["authors"], [{"name": "shmor3"}])
             self.assertEqual(data["project"]["license"], {"file": "LICENSE"})
             self.assertEqual(data["project"]["readme"], "README.md")
-            self.assertEqual(data["project"]["scripts"]["rally"], "rally_core.cli:main")
+            self.assertEqual(
+                data["project"]["scripts"],
+                {"rally": "rally_core.cli:main", "agent-job": "rally_core.cli:main"},
+            )
             self.assertEqual(data["tool"]["setuptools"]["packages"], ["rally_core", "rally_core.providers"])
             self.assertIn("Repository", data["project"]["urls"])
             self.assertIn("Issues", data["project"]["urls"])
@@ -362,6 +366,7 @@ class RallyRepositoryTests(unittest.TestCase):
         self.assertIn("venv", plain_smoke_step["run"])
         self.assertIn("pip install .", plain_smoke_step["run"])
         self.assertIn("rally --help", plain_smoke_step["run"])
+        self.assertIn("agent-job --help", plain_smoke_step["run"])
         self.assertIn("import rally_core", plain_smoke_step["run"])
         self.assertIn("import yaml", plain_smoke_step["run"])
 
