@@ -18,7 +18,7 @@
     "modes": ["new", "resume"],
     "bypass_flags": ["--dangerously-bypass-approvals-and-sandbox"],
     "stream": "jsonl",
-    "example": "rally codex start --effort low --cwd /absolute/project --prompt 'Review.'"
+    "example": "rally codex start --effort low --prompt 'Review.'"
   },
   "claude": {
     "provider": "claude",

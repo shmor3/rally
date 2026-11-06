@@ -65,19 +65,21 @@ Managed jobs:
   without stopping the job. Only terminal SUCCESS exits zero.
 
 Storage and result schema:
-  Transcripts default to <cwd>/.artifacts/agent-jobs/JOB_ID. Use the same caller
-  cwd or AGENT_JOB_DIR for followup/status/wait/read/stop. list --cwd filters jobs.
-  Private files include prompt.txt, request.json, metadata.json, stdout.jsonl,
-  stderr.log, manager logs, response.txt, state, worker.json, and result.json.
-  list/status omit prompts and raw output. Normalized terminal schema_version=1:
-  job_id, provider, status, exit_code, model, effort, session_id, response, usage,
-  error, cwd, transcript_dir, created_at, started_at, finished_at, source_job_id,
-  provider_result. Provider semantic failures override zero process exits.
+  --cwd becomes job workspace and default job-store base (<cwd>/.artifacts/agent-jobs).
+  followup/status/wait/read/stop/list must resolve the same store by running from
+  that job workspace or setting the same absolute AGENT_JOB_DIR for every command.
+  list --cwd filters jobs. Private files include prompt.txt, request.json,
+  metadata.json, stdout.jsonl, stderr.log, manager logs, response.txt, state,
+  worker.json, and result.json. list/status omit prompts and raw output. Normalized
+  terminal schema_version=1: job_id, provider, status, exit_code, model, effort,
+  session_id, response, usage, error, cwd, transcript_dir, created_at, started_at,
+  finished_at, source_job_id, provider_result. Provider semantic failures override
+  zero process exits.
 
 Providers and examples:
   rally agy run --model flash --effort high --prompt 'Review changes.'
   rally copilot start --model auto --max-credits 30 --prompt-file task.txt
-  rally codex start --effort low --cwd /absolute/project --prompt 'Review.'
+  rally codex start --effort low --prompt 'Review.'
   rally claude run --model haiku --effort low --prompt 'Review changes.'
   rally wait JOB_ID
   rally followup JOB_ID --prompt 'Check another case.'

@@ -1160,6 +1160,65 @@ class AgentJobDoctorTests(unittest.TestCase):
             self.assertTrue(example.startswith(f"rally {provider}"), f"Example must start with 'rally {provider}'")
             self.assertIn(example, rally_core.model.HELP_TEXT, f"Example {example} must be present in HELP_TEXT")
 
+    def test_durable_store_cwd_documentation_contract(self):
+        help_text = rally_core.model.HELP_TEXT
+        readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
+
+        # HELP_TEXT wording contract
+        self.assertIn("--cwd becomes job workspace and default job-store base", help_text)
+        normalized_help = " ".join(help_text.split())
+        self.assertIn(
+            "followup/status/wait/read/stop/list must resolve the same store by running from that job workspace or setting the same absolute AGENT_JOB_DIR for every command",
+            normalized_help,
+        )
+        self.assertNotIn("rally codex start --effort low --cwd /absolute/project --prompt 'Review.'\n  rally claude run --model haiku --effort low --prompt 'Review changes.'\n  rally wait JOB_ID", help_text)
+        self.assertIn("rally codex start --effort low --prompt 'Review.'", help_text)
+
+        # README wording contract
+        normalized_readme = " ".join(readme_text.replace("`", "").replace(":", "").split())
+        self.assertIn("--cwd becomes job workspace and default job-store base", normalized_readme)
+        self.assertIn(
+            "followup/status/wait/read/stop/list must resolve the same store by running from that job workspace or setting the same absolute AGENT_JOB_DIR for every command",
+            normalized_readme,
+        )
+        self.assertNotIn("./rally codex start --effort low --cwd /path/to/workspace --prompt 'Analyze benchmarks.'\n\n# Run a blocking job with Claude\n./rally claude run --model haiku --effort low --prompt 'Format markdown.'\n\n# Wait for a background job to finish\n./rally wait", readme_text)
+
+    def test_durable_store_cwd_executable_resolution_contract(self):
+        with tempfile.TemporaryDirectory() as client_dir, tempfile.TemporaryDirectory() as workspace_dir:
+            client_path = Path(client_dir).resolve()
+            workspace_path = Path(workspace_dir).resolve()
+
+            with mock.patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("AGENT_JOB_DIR", None)
+
+                # Starting a job targeting workspace_path places the store in workspace_path/.artifacts/agent-jobs
+                manager = rally_core.process.JobManager(
+                    rally_core.store.JobStore(cwd=workspace_path),
+                )
+                job_req = rally_core.model.JobRequest(
+                    provider="codex",
+                    prompt="test prompt",
+                    cwd=workspace_path,
+                )
+                summary = manager.start(job_req)
+                job_id = summary["job_id"]
+
+                # Store resolved from client_path without AGENT_JOB_DIR cannot find the job
+                client_store = rally_core.store.JobStore(cwd=client_path)
+                with self.assertRaises(ValueError):
+                    client_store.get(job_id)
+
+                # Store resolved from workspace_path finds the job
+                ws_store = rally_core.store.JobStore(cwd=workspace_path)
+                job_from_ws = ws_store.get(job_id)
+                self.assertEqual(job_from_ws.job_id, job_id)
+
+                # Setting absolute AGENT_JOB_DIR from client_path finds the job
+                with mock.patch.dict(os.environ, {"AGENT_JOB_DIR": str(workspace_path / ".artifacts" / "agent-jobs")}):
+                    env_store = rally_core.store.JobStore(cwd=client_path)
+                    job_from_env = env_store.get(job_id)
+                    self.assertEqual(job_from_env.job_id, job_id)
+
 
 class FixtureAdapter:
     def validate(self, request):

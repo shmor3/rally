@@ -62,8 +62,8 @@ Execute jobs directly using `./rally` (or installed `rally`):
 # Start a background job with Copilot
 ./rally copilot start --model auto --max-credits 30 --prompt-file task.txt
 
-# Start a background job with Codex in a specific workspace
-./rally codex start --effort low --cwd /path/to/workspace --prompt 'Analyze benchmarks.'
+# Start a background job with Codex
+./rally codex start --effort low --prompt 'Analyze benchmarks.'
 
 # Run a blocking job with Claude
 ./rally claude run --model haiku --effort low --prompt 'Format markdown.'
@@ -163,8 +163,10 @@ Terminal executions produce a standardized JSON object:
 
 ## Transcript Storage and Privacy
 
-All job files are stored in a dedicated directory per job:
+When starting or running a job, `--cwd` becomes job workspace and default job-store base. All job files are stored in a dedicated directory per job:
 `<cwd>/.artifacts/agent-jobs/<job_id>`
+
+Subsequent commands: followup/status/wait/read/stop/list must resolve the same store by running from that job workspace or setting the same absolute `AGENT_JOB_DIR` for every command.
 
 Each directory contains:
 - `prompt.txt`: The input prompt text.
@@ -187,7 +189,7 @@ Each directory contains:
 
 - **Entrypoint Compatibility**: `./agent-job` is provided alongside `./rally` as an identical entrypoint shim for backwards compatibility.
 - **Environment Variables**:
-  - `AGENT_JOB_DIR`: Overrides the transcript root directory (defaults to `.artifacts/agent-jobs` relative to working directory).
+  - `AGENT_JOB_DIR`: Overrides the transcript root directory (defaults to `<cwd>/.artifacts/agent-jobs`). When `--cwd` is used to target a separate workspace, followup/status/wait/read/stop/list must resolve the same store by running from that job workspace or setting the same absolute `AGENT_JOB_DIR` for every command.
   - `AGENT_JOB_LAUNCHER`: Process supervision backend (`auto`, `launchctl`, or `detached`). `auto` selects macOS `launchctl` when available, falling back to detached POSIX sessions.
   - `AGENT_JOB_LAUNCHCTL`: Custom path to `launchctl` binary when using `launchctl` supervision.
 
